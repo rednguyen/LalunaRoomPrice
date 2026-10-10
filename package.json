@@ -1,0 +1,19 @@
+{
+  "name": "lalunapriceservice",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "dotenv": "^18.0.7",
+    "imapflow": "^2.3.0",
+    "mailparser": "^3.9.37",
+    "otplib": "^12.0.1",
+    "playwright": "^1.64.0"
+  }
+}
