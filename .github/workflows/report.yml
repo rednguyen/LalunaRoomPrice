@@ -8,7 +8,7 @@ on:
   repository_dispatch:
     types: [run-report]
 
-# Don't let two runs overlap (they share the dedupe cache).
+# Don't let two runs overlap (they both update the dedupe log).
 concurrency:
   group: ota-sales-report
   cancel-in-progress: false
@@ -17,8 +17,12 @@ jobs:
   report:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write        # needed to commit the dedupe log back
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}   # stay on the branch so we can commit/push
 
       - uses: actions/setup-node@v4
         with:
@@ -29,15 +33,6 @@ jobs:
 
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
-
-      # Restore the dedupe file so bookings aren't re-reported across runs.
-      - name: Restore dedupe state
-        uses: actions/cache/restore@v4
-        with:
-          path: state/seenReservations.json
-          key: ota-seen-${{ github.run_id }}
-          restore-keys: |
-            ota-seen-
 
       - name: Run report
         run: node src/report.js
@@ -52,10 +47,16 @@ jobs:
           ZALO_BOT_TOKEN: ${{ secrets.ZALO_BOT_TOKEN }}
           ZALO_CHAT_ID: ${{ secrets.ZALO_CHAT_ID }}
 
-      # Save the updated dedupe file for the next run.
-      - name: Save dedupe state
+      # Persist the dedupe log by committing it back to the repo.
+      - name: Commit updated dedupe log
         if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: state/seenReservations.json
-          key: ota-seen-${{ github.run_id }}
+        run: |
+          if git diff --quiet -- state/seenReservations.json; then
+            echo "No dedupe changes to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state/seenReservations.json
+            git commit -m "chore: update dedupe log [skip ci]"
+            git push
+          fi
