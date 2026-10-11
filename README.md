@@ -102,9 +102,33 @@ per date. Overwritten every run.
   business data never get committed.
 - The session file holds live tokens; don't copy it anywhere public.
 
+## Daily OTA Sales report
+
+`node src/report.js` builds the "Báo Cáo OTA Sales" report and sends it to a Zalo
+group. It pulls availability (next `SM_DAYS`) + reservations booked yesterday→now
+(Vietnam time), dedupes against `state/seenReservations.json` (rolling last 100
+`sourceId`s), maps each OTA room back to a SiteMinder room via `roomMappings.json`,
+and reports rooms sold per room type per night (`bán | còn`) with the booking list.
+Messages are split to stay under Zalo's 2000-char limit.
+
+Config: `SM_SPID`, `SM_DAYS`, `SM_TOPUP_ROOMS` (rooms that get a "top up" note when
+`còn=0`), `ZALO_BOT_TOKEN`, `ZALO_CHAT_ID`. Device trust is `skip` (untrusted session).
+
+## Automated schedule (GitHub Actions)
+
+`.github/workflows/report.yml` runs `src/report.js` on a daily cron (01:00 UTC =
+08:00 Vietnam), on manual dispatch, or via an external `repository_dispatch`
+(`event_type: run-report`, e.g. from cron-job.org). The dedupe file is persisted
+between runs with `actions/cache`.
+
+Add these repository **secrets** (Settings → Secrets and variables → Actions):
+`SM_USER`, `SM_PASS`, `SM_TOTP_SECRET`, `SM_SPID`, `ZALO_BOT_TOKEN`, `ZALO_CHAT_ID`.
+
+> Note: GitHub-hosted runners use datacenter IPs, where SiteMinder's Cloudflare may
+> challenge the login (untested). If that happens, run the workflow on a **self-hosted
+> runner** (e.g. a home machine / cheap VPS) for a residential/stable IP.
+
 ## Not done yet
 
-- **Rates/prices** — only availability is pulled so far; rates are a separate GraphQL
-  operation to be added.
-- **Scheduling** — no scheduler yet (GitHub Actions or a persistent host TBD). On
-  ephemeral runners the session can't persist, so each run logs in afresh.
+- **Rates/prices** — only availability + reservations so far; rates are a separate
+  GraphQL operation to be added.

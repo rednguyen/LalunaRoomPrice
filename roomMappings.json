@@ -1,0 +1,92 @@
+{
+  "Superior Double": {
+    "Booking.com": "Superior Double Room with Large Window",
+    "Agoda": "Superior Double Room",
+    "Expedia": "Superior Double Room",
+    "Trip.com": "Superior Double Room",
+    "OhMyHotel": "Superior Double Room",
+    "Traveloka": "Superior Double",
+     "Direct Booking": "Superior Double, Large Window"
+  },
+  "Superior Twin": {
+    "Booking.com": "Superior Twin Room with Large Window",
+    "Agoda": "Superior Twin Room",
+    "Expedia": "Superior Twin Room",
+    "Trip.com": "Superior Twin Room",
+    "OhMyHotel": "Superior Twin Room",
+    "Traveloka": "Superior Twin",
+     "Direct Booking": "Superior Twin, Large Window"
+  },
+  "Deluxe Double": {
+    "Booking.com": "Deluxe King Room with Balcony",
+    "Agoda": "Deluxe King Balcony",
+    "Expedia": "Deluxe Double Room, Pool View",
+    "Trip.com": "Deluxe Double Room with Pool View",
+    "OhMyHotel": "Deluxe Double Room",
+    "Traveloka": "Deluxe Double",
+     "Direct Booking": "Deluxe Double, Pool/Garden/City View"
+  },
+  "Deluxe Twin": {
+    "Booking.com": "Deluxe Twin Room with Balcony",
+    "Agoda": "Deluxe Twin Balcony City View",
+    "Expedia": "Deluxe Twin Room (Garden View or City View)",
+    "Trip.com": "Deluxe Twin Room with Garden or City view",
+    "OhMyHotel": "Deluxe Twin Room",
+    "Traveloka": "Deluxe Twin",
+     "Direct Booking": "Deluxe Twin, Garden/City view"
+  },
+  "Super Deluxe Double": {
+    "Booking.com": "Super Deluxe Double Room with Balcony and River View",
+    "Agoda": "Super Deluxe Double Room",
+    "Expedia": "Super Deluxe Double, Balcony, River View",
+    "Trip.com": "Super Deluxe Double Room with River View",
+    "OhMyHotel": "Super Deluxe Double Room",
+    "Traveloka": "Super Deluxe Double",
+     "Direct Booking": "Super Deluxe Double, River View"
+  },
+  "Super Deluxe Twin": {
+    "Booking.com": "Super Deluxe Twin Room with Balcony and River View",
+    "Agoda": "Super Deluxe Twin Bed",
+    "Expedia": "Super Deluxe Twin, Balcony, River View",
+    "Trip.com": "Super Deluxe Twin Room with River View",
+    "OhMyHotel": "Super Deluxe Twin Room",
+    "Traveloka": "Super Deluxe Twin",
+     "Direct Booking": "Super Deluxe Twin, River View"
+  },
+  "Luxury": {
+    "Booking.com": "Luxury Double Room, Bathtub with Balcony and River View",
+    "Agoda": "Luxury King Room",
+    "Expedia": "Luxury Double Room, Balcony, River View",
+    "Trip.com": "Luxury King with River View",
+    "OhMyHotel": "Laluna Luxury Room",
+    "Traveloka": "Laluna Luxury",
+     "Direct Booking": "Luxury King, River View"
+  },
+  "Suite": {
+    "Booking.com": "King Suite with Balcony and River View",
+    "Agoda": "Suite River View",
+    "Expedia": "Suite, Balcony, River View",
+    "Trip.com": "Suite with River View",
+    "OhMyHotel": "Suite River View",
+    "Traveloka": "King Suites",
+     "Direct Booking": "Suite, River View"
+  },
+  "Family Pool View (DLX)": {
+    "Booking.com": "Family Connecting Room with Balcony and Pool View",
+    "Agoda": "Family Connecting Room with Balcony",
+    "Expedia": "Family Connecting Room, Balcony, Pool View",
+    "Trip.com": "Family Connecting Room With Pool View",
+    "OhMyHotel": "Deluxe Family Next Door",
+    "Traveloka": "Family Pool View",
+     "Direct Booking": "Family Connecting Room, Pool View"
+  },
+  "Family River View (SUPER DLX)": {
+    "Booking.com": "Family Connecting Room with Bathroom - Balcony and River View",
+    "Agoda": "Deluxe River View Family Connecting Rooms",
+    "Expedia": "Family Connecting Room, Balcony, River View",
+    "Trip.com": "Family Connecting Room With River View",
+    "OhMyHotel": "Superdeluxe Family Connecting",
+    "Traveloka": "Family River View",
+     "Direct Booking": "Family Connecting Room, River View"
+  }
+}

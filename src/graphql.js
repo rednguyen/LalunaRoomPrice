@@ -29,7 +29,7 @@ async function withGraphql(fn) {
     const xsrf = (await ctx.cookies("https://platform.siteminder.com")).find((c) => c.name === "sm_xsrf_token");
     if (!xsrf) throw new AuthError("no sm_xsrf_token cookie (session likely invalid)");
 
-    const run = async (operationName, query, variables) => {
+    const run = async (operationName, query, variables, url = GQL_URL) => {
       const res = await page.evaluate(async ({ url, token, body }) => {
         const r = await fetch(url, {
           method: "POST",
@@ -38,7 +38,7 @@ async function withGraphql(fn) {
           body: JSON.stringify(body),
         });
         return { status: r.status, text: await r.text() };
-      }, { url: GQL_URL, token: xsrf.value, body: { operationName, query, variables } });
+      }, { url, token: xsrf.value, body: { operationName, query, variables } });
 
       if (res.status === 401 || res.status === 403) throw new AuthError(`GraphQL ${res.status}: ${res.text.slice(0, 160)}`);
       let json;

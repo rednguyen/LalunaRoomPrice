@@ -4,14 +4,12 @@ const fs = require("fs");
 const path = require("path");
 const { withGraphqlAuth, SPID } = require("./graphql");
 
-const DEFAULT_ROOM_TYPES = [
-  "hb1t7om5re23c0gx", "bqldea8rpetossgw", "lxdvyjthjsczwfso", "lal50vd680svurcy",
-  "ectsohufybm6oyzm", "wanj8h8tuqlyutgo", "49mlpyvbr4rf0h4k", "pgtxjvurkqzinjg9",
-  "hwn87gwt3zlttgls", "6qodw8wd3zqrukkb",
-];
-const ROOM_TYPE_UUIDS = (process.env.SM_ROOM_TYPE_UUIDS
-  ? process.env.SM_ROOM_TYPE_UUIDS.split(",").map((s) => s.trim()).filter(Boolean)
-  : DEFAULT_ROOM_TYPES);
+// Room types come from roomTypes.json ([{uuid, name}, ...]). Names are used as
+// CSV headers / legend labels; blank names fall back to the UUID.
+const ROOM_TYPES_FILE = process.env.SM_ROOM_TYPES_FILE || "roomTypes.json";
+const ROOM_TYPES = JSON.parse(fs.readFileSync(ROOM_TYPES_FILE, "utf8"));
+const ROOM_TYPE_UUIDS = ROOM_TYPES.map((r) => r.uuid);
+const NAME_BY_UUID = new Map(ROOM_TYPES.map((r) => [r.uuid, (r.name || "").trim() || r.uuid]));
 
 const DAYS = Number(process.env.SM_DAYS || 365);
 
@@ -43,7 +41,7 @@ function printTable(rows, dates) {
   // column labels A, B, C … for each room type
   const labels = ROOM_TYPE_UUIDS.map((_, i) => String.fromCharCode(65 + i));
   console.log("\nRoom types:");
-  ROOM_TYPE_UUIDS.forEach((u, i) => console.log(`  ${labels[i]} = ${u}`));
+  ROOM_TYPE_UUIDS.forEach((u, i) => console.log(`  ${labels[i]} = ${NAME_BY_UUID.get(u)}  (${u})`));
 
   const w = 3; // column width for numbers
   const header = "Date".padEnd(12) + labels.map((l) => l.padStart(w)).join(" ");
@@ -101,7 +99,8 @@ function writeOutputs(rows, dates) {
 
   // Wide grid: date + one column per room type. Easy to open in Excel.
   const map = new Map(rows.map((r) => [`${r.date}|${r.roomTypeUuid}`, r.available]));
-  const header = ["date", ...ROOM_TYPE_UUIDS].join(",");
+  const q = (s) => (/[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
+  const header = ["date", ...ROOM_TYPE_UUIDS.map((u) => q(NAME_BY_UUID.get(u)))].join(",");
   const lines = dates.map((d) =>
     [d, ...ROOM_TYPE_UUIDS.map((u) => { const v = map.get(`${d}|${u}`); return v === undefined ? "" : v; })].join(",")
   );
