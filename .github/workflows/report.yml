@@ -49,6 +49,7 @@ jobs:
           SM_PASS: ${{ secrets.SM_PASS }}
           SM_TOTP_SECRET: ${{ secrets.SM_TOTP_SECRET }}
           SM_SPID: ${{ secrets.SM_SPID }}
+          SM_DAYS: "450"
           SM_DEVICE_TRUST: skip
           SM_HEADFUL: "false"
           ZALO_BOT_TOKEN: ${{ secrets.ZALO_BOT_TOKEN }}
