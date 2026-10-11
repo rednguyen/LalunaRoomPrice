@@ -191,7 +191,7 @@ function guestName(g) {
 
   let report;
   if (roomOrder.length === 0) {
-    report = `${title}\n\n✅ Không có booking mới từ hôm qua đến hiện tại.`;
+    report = `${title}\n\n✅ Không có booking mới nào đến thời điểm hiện tại.`;
   } else {
     const sections = roomOrder.map((smName) => {
       const bucket = perRoom.get(smName);
