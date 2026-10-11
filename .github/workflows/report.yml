@@ -1,12 +1,9 @@
 name: OTA Sales Report
 
 on:
-  # Daily schedule (UTC). 01:00 UTC = 08:00 Vietnam time. Adjust as you like.
-  schedule:
-    - cron: "0 1 * * *"
   # Manual run from the Actions tab.
   workflow_dispatch: {}
-  # External trigger (e.g. cron-job.org) via the GitHub API:
+  # Scheduled trigger comes from cron-job.org via the GitHub API:
   #   POST /repos/<owner>/<repo>/dispatches  { "event_type": "run-report" }
   repository_dispatch:
     types: [run-report]
