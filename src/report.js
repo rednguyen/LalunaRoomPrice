@@ -75,6 +75,12 @@ function fmtMoney(n, currency) {
   const amt = String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   return (currency || "VND") === "VND" ? `${amt}đ` : `${amt} ${currency}`;
 }
+// Stay as check-in → check-out, e.g. "05→09/02" (same month) or "28/01→02/02".
+function stayRange(fromISO, checkOutISO) {
+  const [fy, fm, fd] = fromISO.split("-");
+  const [ty, tm, td] = checkOutISO.split("-");
+  return fm === tm && fy === ty ? `${fd}→${td}/${fm}` : `${fd}/${fm}→${td}/${tm}`;
+}
 
 // ---- mapping: channel.name + roomName -> SiteMinder room type ----
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -176,12 +182,12 @@ function guestName(g) {
     const stayNights = allNights.filter((n) => n >= todayISO);
     const chKey = resolveChannelKey(r.channel && r.channel.name);
 
-    // Per-room nightly rate = reservation total / #rooms / #nights (full stay).
+    // Per-room figures: reservation total / #rooms (÷ #nights for the nightly rate).
     const numNights = allNights.length || 1;
     const numRooms = (r.roomStays || []).length || 1;
     const amt = r.totalAmount && r.totalAmount.amountAfterTax;
-    const priceLabel = amt != null
-      ? ` | 💰 ${fmtMoney(amt / numRooms / numNights, r.currency)}/đêm (${numNights} đêm)`
+    const priceLine = amt != null
+      ? `\n   💰 ${fmtMoney(amt / numRooms / numNights, r.currency)}/đêm · ${stayRange(r.fromDate, checkOut)} · tổng ${fmtMoney(amt / numRooms, r.currency)}`
       : "";
 
     let mappedAny = false;
@@ -193,7 +199,7 @@ function guestName(g) {
       if (!perRoom.has(smRoom)) perRoom.set(smRoom, { nights: new Map(), bookings: new Map() });
       const bucket = perRoom.get(smRoom);
       for (const night of stayNights) bucket.nights.set(night, (bucket.nights.get(night) || 0) + 1);
-      bucket.bookings.set(r.sourceId, `👤 ${r.channel && r.channel.name} ID - ${r.sourceId}: ${guestName(r.mainGuest)}${priceLabel}`);
+      bucket.bookings.set(r.sourceId, `👤 ${r.channel && r.channel.name} - ${r.sourceId} | ${guestName(r.mainGuest)}${priceLine}`);
     }
     // Only consume reservations we actually reported; leave fully-unmapped ones
     // unseen so they retry once their channel/room mapping is added.
