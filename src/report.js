@@ -22,8 +22,9 @@ const roomMappings = JSON.parse(fs.readFileSync("roomMappings.json", "utf8")); /
 const uuidByName = new Map(roomTypes.map((r) => [r.name, r.uuid]));
 const CHANNEL_KEYS = [...new Set(Object.values(roomMappings).flatMap((c) => Object.keys(c)))];
 // Rooms that get a "top up" nudge when availability hits 0 on a sold night.
+// Disabled by default; set SM_TOPUP_ROOMS (e.g. "Superior Double,Deluxe Double") to enable.
 const TOP_UP_ROOMS = new Set(
-  (process.env.SM_TOPUP_ROOMS || "Superior Double,Deluxe Double").split(",").map((s) => s.trim())
+  (process.env.SM_TOPUP_ROOMS || "").split(",").map((s) => s.trim()).filter(Boolean)
 );
 
 const AVAIL_QUERY = `query roomTypeDates($spid: ID!, $roomTypeUuids: [ID!]!, $dates: [LocalDate!]!, $isCmInventoryGridFeatureEnabled: Boolean!) {
