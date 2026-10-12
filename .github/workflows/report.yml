@@ -35,7 +35,15 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run report
-        run: node src/report.js
+        run: |
+          for attempt in 1 2 3; do
+            echo "::group::Attempt $attempt"
+            if node src/report.js; then echo "::endgroup::"; exit 0; fi
+            echo "Attempt $attempt failed."
+            echo "::endgroup::"
+            [ "$attempt" -lt 3 ] && { echo "Retrying in 60s..."; sleep 60; }
+          done
+          echo "All attempts failed."; exit 1
         env:
           SM_USER: ${{ secrets.SM_USER }}
           SM_PASS: ${{ secrets.SM_PASS }}
