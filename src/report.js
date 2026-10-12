@@ -122,14 +122,14 @@ async function fetchAvailability(run, startISO, count = AVAIL_DAYS) {
   return avail;
 }
 
-async function fetchReservations(run, startVN, endVN) {
+// Paginate getReservationsSearch with the given filters/sort.
+async function fetchAll(run, filters, sortBy) {
   const out = [];
   let page = 1; const pageSize = 100; let total = Infinity;
   while ((page - 1) * pageSize < total) {
     const data = await run("getReservationsSearch", RES_QUERY, {
-      spid: SPID,
-      filters: { bookedOnDateRange: { startDate: startVN, endDate: endVN } },
-      pagination: { page, pageSize, sortBy: "bookedOnDate", sortOrder: "asc" },
+      spid: SPID, filters,
+      pagination: { page, pageSize, sortBy, sortOrder: "asc" },
     }, RES_URL);
     const pr = data?.hotel?.platformReservations;
     if (!pr) break;
@@ -140,6 +140,12 @@ async function fetchReservations(run, startVN, endVN) {
   }
   return out;
 }
+// New bookings: filter by when the booking was made.
+const fetchReservations = (run, startVN, endVN) =>
+  fetchAll(run, { bookedOnDateRange: { startDate: startVN, endDate: endVN } }, "bookedOnDate");
+// Cancellations: filter by when it was cancelled (catches old bookings cancelled now).
+const fetchCancellations = (run, startVN, endVN) =>
+  fetchAll(run, { bookingCancelledDateRange: { startDate: startVN, endDate: endVN }, bookingStatus: ["Cancellation"] }, "cancelledOnDate");
 
 function guestName(g) {
   if (!g) return "";
@@ -158,13 +164,14 @@ function guestName(g) {
   const seen = loadSeen();
   const seenSet = new Set(seen);
 
-  const { avail, reservations } = await withGraphqlAuth(async (run) => {
+  const { avail, reservations, cancelled } = await withGraphqlAuth(async (run) => {
     const avail = await fetchAvailability(run, todayISO);
     const reservations = await fetchReservations(run, bookedStart, bookedEnd);
-    return { avail, reservations };
+    const cancelled = await fetchCancellations(run, bookedStart, bookedEnd);
+    return { avail, reservations, cancelled };
   });
 
-  console.log(`Fetched: availability ${avail.size} cells, reservations ${reservations.length} in window ${yesterdayISO}..${todayISO} (VN)`);
+  console.log(`Fetched: availability ${avail.size} cells, reservations ${reservations.length}, cancellations ${cancelled.length} in window ${yesterdayISO}..${todayISO} (VN)`);
 
   // perRoom: smName -> { nights: Map(date->count), bookings: Map(sourceId->line) }
   const perRoom = new Map();
@@ -175,23 +182,8 @@ function guestName(g) {
   for (const r of reservations) {
     const checkOut = r.checkOutDate || r.toDate;
     const chKey = resolveChannelKey(r.channel && r.channel.name);
-    const isCancel = r.type === "Cancellation" || !!r.canceledAt;
-
-    // ---- cancellation ----
-    // Same sourceId as the original booking, so dedupe under a distinct "|C" key.
-    if (isCancel) {
-      const ckey = `${r.sourceId}|C`;
-      if (seenSet.has(ckey)) continue;
-      newSourceIds.push(ckey);
-      const rooms = [...new Set((r.roomStays || []).map((rs) => resolveRoomType(chKey, rs.roomName) || rs.roomName))];
-      const total = r.totalAmount && r.totalAmount.amountAfterTax;
-      const when = r.fromDate && checkOut ? stayRange(r.fromDate, checkOut) : "?";
-      cancellations.push(
-        `👤 ${r.channel && r.channel.name} - ${r.sourceId} | ${guestName(r.mainGuest)}\n` +
-        `   🛏️ ${rooms.join(", ") || "(?)"} · ${when}${total != null ? ` · 💰 ${fmtMoney(total, r.currency)}` : ""}`
-      );
-      continue;
-    }
+    // Cancellations come from the dedicated cancellation query (processed below) — skip here.
+    if (r.type === "Cancellation" || r.canceledAt) continue;
 
     // ---- new booking ----
     if (seenSet.has(r.sourceId)) continue;        // already handled in a prior run
@@ -223,6 +215,23 @@ function guestName(g) {
     // Only consume reservations we actually reported; leave fully-unmapped ones
     // unseen so they retry once their channel/room mapping is added.
     if (mappedAny) newSourceIds.push(r.sourceId);
+  }
+
+  // ---- cancellations (by cancellation date; includes bookings made outside the window) ----
+  // Same sourceId as the original booking, so dedupe under a distinct "|C" key.
+  for (const r of cancelled) {
+    const ckey = `${r.sourceId}|C`;
+    if (seenSet.has(ckey)) continue;
+    newSourceIds.push(ckey);
+    const chKey = resolveChannelKey(r.channel && r.channel.name);
+    const checkOut = r.checkOutDate || r.toDate;
+    const rooms = [...new Set((r.roomStays || []).map((rs) => resolveRoomType(chKey, rs.roomName) || rs.roomName))];
+    const total = r.totalAmount && r.totalAmount.amountAfterTax;
+    const when = r.fromDate && checkOut ? stayRange(r.fromDate, checkOut) : "?";
+    cancellations.push(
+      `👤 ${r.channel && r.channel.name} - ${r.sourceId} | ${guestName(r.mainGuest)}\n` +
+      `   🛏️ ${rooms.join(", ") || "(?)"} · ${when}${total != null ? ` · 💰 ${fmtMoney(total, r.currency)}` : ""}`
+    );
   }
 
   // ---- build report text ----
