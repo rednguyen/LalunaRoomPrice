@@ -105,9 +105,19 @@ in production, so stays up to ~15 months out still have availability).
 
 ### 3.3 Reservations — `getReservationsSearch`
 
-Filtered by `bookedOnDateRange` (when the booking was made), paginated (100/page). Each
-reservation has `channel`, `fromDate`/`checkOutDate`, `roomStays[]` (one per room booked,
-each with a channel-specific `roomName`), `mainGuest`, `canceledAt`, `modifiedAt`.
+Two passes over the same operation (paginated, 100/page):
+- **New bookings:** filter `bookedOnDateRange` (when booked), sort `bookedOnDate`.
+- **Cancellations:** filter `bookingCancelledDateRange` + `bookingStatus: ["Cancellation"]`,
+  sort `cancelledOnDate` — by **cancellation date**, so it catches bookings cancelled now
+  **regardless of when they were booked**.
+
+Each record has `channel`, `fromDate`/`checkOutDate`, `currency`, `totalAmount`, `roomStays[]`
+(each with a channel-specific `roomName`), `mainGuest`, `canceledAt`, `modifiedAt`, and `type`
+(`Reservation` / `Modification` / `Cancellation`).
+
+> Gotcha: the server returns a generic `"Server error"` for **unknown filter fields** (it
+> masks validation errors), so filter names can't be discovered by probing — they must be
+> read off the app's own DevTools requests (that's how `bookingCancelledDateRange` was found).
 
 ---
 
@@ -141,28 +151,41 @@ Produces the "Báo Cáo OTA Sales" report. All dates/times are **Asia/Ho_Chi_Min
 **Steps:**
 1. **Availability** — pull `roomTypeDates` for the next `SM_DAYS` days → the `còn`
    (rooms remaining) source. Held in memory only (a live snapshot; never written to disk).
-2. **Reservations** — pull bookings made **yesterday 00:00 → today 23:59:59 (VN)**,
-   paginated. Dedupe against `state/seenReservations.json` (**rolling last 100**
-   `sourceId`s) so a booking is only reported once; unmapped bookings are **not** consumed
-   (they retry once their mapping exists). **Skip** cancelled/modified (`canceledAt` /
-   `modifiedAt`) for now.
-3. **Aggregate** — for each new reservation's `roomStays`, map to a SiteMinder room; the
-   stay occupies nights `fromDate → checkOutDate` (exclusive), counting **only nights from
-   today onward**. `bán` per night = rooms sold; `còn` = the availability snapshot.
+2. **Bookings** — pull reservations made **yesterday 00:00 → today 23:59:59 (VN)**. Dedupe
+   against `state/seenReservations.json` (**rolling last 100** keys) so each reports once;
+   unmapped bookings are **not** consumed (they retry once their mapping exists).
+   `Modification` records are skipped; `Cancellation` records are handled in step 4.
+3. **Aggregate** — for each booking's `roomStays`, map to a SiteMinder room; the stay occupies
+   nights `fromDate → checkOutDate` (exclusive), counting **only nights from today onward**.
+   `bán` per night = rooms sold; `còn` = the availability snapshot.
+4. **Cancellations** — pull via the cancellation query (step above) and list each in a separate
+   **❌ Hủy phòng** message. Deduped under a distinct `<sourceId>|C` key (so a cancellation
+   reports once, independent of its original booking, in the same log file).
 
-**Output format** (sections ordered by `roomMappings.json`, separated by a dashed line;
-title on the first message only):
+**Output** — two independent messages (each chunked under Zalo's 2000-char limit), sections
+ordered by `roomMappings.json` and separated by a dashed line.
 
+Message 1 — **bookings** (always sent):
 ```
 📊 Báo Cáo OTA Sales ngày 12-10-2026:
 
 🛏️ Superior Double:
-📅 Ngày 23-10-2026: bán 1 | còn 0 ---> sales cân nhắc top up
 📅 Ngày 24-10-2026: bán 1 | còn 2
-👤 Booking.com ID - 6010480449: Lydia Mawdsley
+👤 Booking.com - 6010480449 | Lydia Mawdsley
+   💰 1.491.950đ/đêm · 24→26/10 · tổng 2.983.900đ
 ----------------------------------------
 🛏️ Deluxe Double:
 ...
+```
+Each booking's 2nd line is the **per-room nightly rate** (`total ÷ rooms ÷ nights`), the
+**stay range** (check-in → check-out), and the per-room **total**.
+
+Message 2 — **cancellations** (sent only when there are any):
+```
+❌ Hủy phòng ngày 12-10-2026:
+
+👤 Booking.com - 5280356445 | Zhang Yucheng
+   🛏️ Family Pool View (DLX) · 19→21/08 · 💰 11.375.316đ
 ```
 
 - **Top-up nudge:** for rooms listed in `SM_TOPUP_ROOMS`, a `còn = 0` night gets
@@ -177,9 +200,11 @@ title on the first message only):
 Sends via the Zalo Bot API: `POST https://bot-api.zaloplatforms.com/bot<TOKEN>/sendMessage`
 with `{ chat_id, text }` (axios), configured by `ZALO_BOT_TOKEN` + `ZALO_CHAT_ID`.
 
-- **Zalo caps messages at ~2000 chars**, so the report is split into multiple messages,
-  **never splitting a room-type section** (packed on section boundaries; a single oversized
-  section falls back to line-splitting). The **title appears on the first message only**.
+- **Bookings and cancellations are two independent reports** (two `sendToZalo` calls); the
+  cancellations report is only sent when there are cancellations.
+- **Zalo caps messages at ~2000 chars**, so each report is split into multiple messages,
+  **never splitting a section** (packed on section boundaries; a single oversized section
+  falls back to line-splitting). The **title appears on the first message only** of each report.
 - If the token/chat id aren't set, it prints the report instead (so the pipeline is
   testable without sending).
 
@@ -241,8 +266,9 @@ runner** on a residential/stable IP, where `skip` mode always works.
 
 ## 8. Security
 
-- `.env`, `state/`, and `data/` are **gitignored** — credentials, the live session, and
-  business data never get committed.
+- `.env`, `data/`, and `state/storageState.json` are **gitignored** — credentials, business
+  data, and the live session never get committed. (`state/seenReservations.json`, the dedupe
+  log, is tracked on purpose — see §7.1.)
 - Keep the GitHub repo **private**; it drives the account and references secrets.
 - The automated path uses `SM_DEVICE_TRUST=skip`, so both factors (password + TOTP seed)
   live in GitHub secrets; MFA no longer adds protection for that path — an accepted
@@ -289,7 +315,12 @@ roomMappings.json        SiteMinder name → per-channel OTA room name (6 OTAs +
 
 - **Rates/prices** — only availability + reservations are pulled; rates are a separate
   GraphQL operation to add.
-- **Cancellations/modifications** — currently skipped; could be reported separately.
+- **Modifications** — `Modification` records are still skipped (only new bookings and
+  cancellations are reported).
+- **Old/renamed room names** — a booking made long ago (surfaced via a cancellation) may
+  carry an outdated OTA room name that no longer prefix-matches `roomMappings.json`; it then
+  shows the raw channel name instead of the SiteMinder name. (Could be fixed with multiple
+  name variants per channel.)
 - **Multi-message marker** — an optional `(1/N)` indicator on split reports.
 - **Datacenter-IP step-up** — handled by the auto-retry (§7.2); a *persistent* occurrence
   would require a self-hosted runner (residential IP). Each fresh login also triggers a
