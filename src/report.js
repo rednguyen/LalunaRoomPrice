@@ -40,6 +40,8 @@ const RES_QUERY = `query getReservationsSearch($spid: ID!, $filters: PlatformRes
         uuid sourceId
         channel { code name __typename }
         fromDate toDate checkOutDate canceledAt modifiedAt channelCreatedAt
+        currency
+        totalAmount { amountAfterTax amountBeforeTax __typename }
         roomStays { roomName __typename }
         mainGuest { firstName middleName lastName __typename }
         __typename
@@ -67,6 +69,11 @@ function nights(fromDate, checkOut) {
   const out = [];
   for (let cur = fromDate; cur < checkOut; cur = addDaysISO(cur, 1)) out.push(cur);
   return out;
+}
+// Format money VN-style (1500000 -> "1.500.000đ"); non-VND keeps the currency code.
+function fmtMoney(n, currency) {
+  const amt = String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return (currency || "VND") === "VND" ? `${amt}đ` : `${amt} ${currency}`;
 }
 
 // ---- mapping: channel.name + roomName -> SiteMinder room type ----
@@ -164,9 +171,18 @@ function guestName(g) {
 
     const checkOut = r.checkOutDate || r.toDate;
     if (!r.fromDate || !checkOut) { newSourceIds.push(r.sourceId); continue; }
+    const allNights = nights(r.fromDate, checkOut);
     // Only report nights from today onward (skip yesterday/past nights).
-    const stayNights = nights(r.fromDate, checkOut).filter((n) => n >= todayISO);
+    const stayNights = allNights.filter((n) => n >= todayISO);
     const chKey = resolveChannelKey(r.channel && r.channel.name);
+
+    // Per-room nightly rate = reservation total / #rooms / #nights (full stay).
+    const numNights = allNights.length || 1;
+    const numRooms = (r.roomStays || []).length || 1;
+    const amt = r.totalAmount && r.totalAmount.amountAfterTax;
+    const priceLabel = amt != null
+      ? ` | 💰 ${fmtMoney(amt / numRooms / numNights, r.currency)}/đêm (${numNights} đêm)`
+      : "";
 
     let mappedAny = false;
     for (const rs of (r.roomStays || [])) {
@@ -177,7 +193,7 @@ function guestName(g) {
       if (!perRoom.has(smRoom)) perRoom.set(smRoom, { nights: new Map(), bookings: new Map() });
       const bucket = perRoom.get(smRoom);
       for (const night of stayNights) bucket.nights.set(night, (bucket.nights.get(night) || 0) + 1);
-      bucket.bookings.set(r.sourceId, `👤 ${r.channel && r.channel.name} ID - ${r.sourceId}: ${guestName(r.mainGuest)}`);
+      bucket.bookings.set(r.sourceId, `👤 ${r.channel && r.channel.name} ID - ${r.sourceId}: ${guestName(r.mainGuest)}${priceLabel}`);
     }
     // Only consume reservations we actually reported; leave fully-unmapped ones
     // unseen so they retry once their channel/room mapping is added.
