@@ -170,17 +170,36 @@ function guestName(g) {
   const perRoom = new Map();
   const unmapped = [];
   const newSourceIds = [];
+  const cancellations = [];
 
   for (const r of reservations) {
-    if (seenSet.has(r.sourceId)) continue;       // already handled in a prior run
-    if (r.canceledAt || r.modifiedAt) { newSourceIds.push(r.sourceId); continue; } // skip (consume)
-
     const checkOut = r.checkOutDate || r.toDate;
+    const chKey = resolveChannelKey(r.channel && r.channel.name);
+    const isCancel = r.type === "Cancellation" || !!r.canceledAt;
+
+    // ---- cancellation ----
+    // Same sourceId as the original booking, so dedupe under a distinct "|C" key.
+    if (isCancel) {
+      const ckey = `${r.sourceId}|C`;
+      if (seenSet.has(ckey)) continue;
+      newSourceIds.push(ckey);
+      const rooms = [...new Set((r.roomStays || []).map((rs) => resolveRoomType(chKey, rs.roomName) || rs.roomName))];
+      const total = r.totalAmount && r.totalAmount.amountAfterTax;
+      const when = r.fromDate && checkOut ? stayRange(r.fromDate, checkOut) : "?";
+      cancellations.push(
+        `👤 ${r.channel && r.channel.name} - ${r.sourceId} | ${guestName(r.mainGuest)}\n` +
+        `   🛏️ ${rooms.join(", ") || "(?)"} · ${when}${total != null ? ` · 💰 ${fmtMoney(total, r.currency)}` : ""}`
+      );
+      continue;
+    }
+
+    // ---- new booking ----
+    if (seenSet.has(r.sourceId)) continue;        // already handled in a prior run
+    if (r.modifiedAt) { newSourceIds.push(r.sourceId); continue; }        // skip modifications for now
     if (!r.fromDate || !checkOut) { newSourceIds.push(r.sourceId); continue; }
     const allNights = nights(r.fromDate, checkOut);
     // Only report nights from today onward (skip yesterday/past nights).
     const stayNights = allNights.filter((n) => n >= todayISO);
-    const chKey = resolveChannelKey(r.channel && r.channel.name);
 
     // Per-room figures: reservation total / #rooms (÷ #nights for the nightly rate).
     const numNights = allNights.length || 1;
@@ -212,24 +231,27 @@ function guestName(g) {
   const roomOrder = Object.keys(roomMappings).filter((n) => perRoom.has(n));
   const SEP = "----------------------------------------";
 
+  const sections = roomOrder.map((smName) => {
+    const bucket = perRoom.get(smName);
+    const uuid = uuidByName.get(smName);
+    const sec = [`🛏️ ${smName}:`];
+    for (const date of [...bucket.nights.keys()].sort()) {
+      const sold = bucket.nights.get(date);
+      const left = avail.get(`${uuid}|${date}`);
+      let line = `📅 Ngày ${ddmmyyyy(date)}: bán ${sold} | còn ${left === undefined ? "?" : left}`;
+      if (left === 0 && TOP_UP_ROOMS.has(smName)) line += " -> sales cân nhắc top up";
+      sec.push(line);
+    }
+    for (const line of bucket.bookings.values()) sec.push(line);
+    return sec.join("\n");
+  });
+  // Cancellations go in their own section at the end.
+  if (cancellations.length) sections.push(["❌ Hủy phòng:", ...cancellations].join("\n"));
+
   let report;
-  if (roomOrder.length === 0) {
+  if (sections.length === 0) {
     report = `${title}\n\n✅ Không có booking mới nào đến thời điểm hiện tại.`;
   } else {
-    const sections = roomOrder.map((smName) => {
-      const bucket = perRoom.get(smName);
-      const uuid = uuidByName.get(smName);
-      const sec = [`🛏️ ${smName}:`];
-      for (const date of [...bucket.nights.keys()].sort()) {
-        const sold = bucket.nights.get(date);
-        const left = avail.get(`${uuid}|${date}`);
-        let line = `📅 Ngày ${ddmmyyyy(date)}: bán ${sold} | còn ${left === undefined ? "?" : left}`;
-        if (left === 0 && TOP_UP_ROOMS.has(smName)) line += " -> sales cân nhắc top up";
-        sec.push(line);
-      }
-      for (const line of bucket.bookings.values()) sec.push(line);
-      return sec.join("\n");
-    });
     report = `${title}\n\n` + sections.join(`\n${SEP}\n`);
   }
 
