@@ -38,10 +38,11 @@ jobs:
         run: |
           for attempt in 1 2 3; do
             echo "::group::Attempt $attempt"
+            rm -f state/storageState.json   # fresh login each attempt (clears a step-up'd session)
             if node src/report.js; then echo "::endgroup::"; exit 0; fi
             echo "Attempt $attempt failed."
             echo "::endgroup::"
-            [ "$attempt" -lt 3 ] && { echo "Retrying in 60s..."; sleep 60; }
+            [ "$attempt" -lt 3 ] && { echo "Retrying in 90s..."; sleep 90; }
           done
           echo "All attempts failed."; exit 1
         env:

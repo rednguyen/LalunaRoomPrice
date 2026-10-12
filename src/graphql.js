@@ -40,7 +40,14 @@ async function withGraphql(fn) {
         return { status: r.status, text: await r.text() };
       }, { url, token: xsrf.value, body: { operationName, query, variables } });
 
-      if (res.status === 401 || res.status === 403) throw new AuthError(`GraphQL ${res.status}: ${res.text.slice(0, 160)}`);
+      if (res.status === 401 || res.status === 403) {
+        // Risk-engine step-up (common from datacenter IPs) can't be cleared by an
+        // in-process re-login — fail so the outer retry starts a fresh attempt.
+        if (/step_up_required/i.test(res.text)) {
+          throw new Error(`GraphQL ${res.status} step_up_required — risk engine wants step-up auth; failing for a fresh retry.`);
+        }
+        throw new AuthError(`GraphQL ${res.status}: ${res.text.slice(0, 160)}`);
+      }
       let json;
       try { json = JSON.parse(res.text); } catch { throw new Error(`Non-JSON response: ${res.text.slice(0, 200)}`); }
       if (json.errors) throw new Error(`GraphQL errors: ${JSON.stringify(json.errors).slice(0, 300)}`);
