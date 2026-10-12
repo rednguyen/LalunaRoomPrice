@@ -6,7 +6,7 @@ a daily Vietnamese "Báo Cáo OTA Sales" report and deliver it to a Zalo group.
 
 - **Property (spid):** `f480c881-63c3-4a11-8d81-bba590c4bbca`
 - **Stack:** Node.js + Playwright (headless Chromium) + axios
-- **Runs on:** GitHub Actions (daily cron), repo `rednguyen/LalunaRoomPrice`
+- **Runs on:** GitHub Actions (triggered daily by cron-job.org), repo `rednguyen/LalunaRoomPrice`
 
 ---
 
@@ -65,8 +65,9 @@ which is why we drive a real browser instead of replaying HTTP by hand.
 
 ### 2.3 Gotchas learned
 
-- Site is behind **Cloudflare**; headless Playwright passed from both residential **and**
-  GitHub-Actions datacenter IPs (so no self-hosted runner was needed).
+- Site is behind **Cloudflare**; headless Playwright passes it. The **login** works from
+  both residential and GitHub datacenter IPs — but from the datacenter IP the risk engine
+  intermittently demands step-up on the **data** call (see §7.2).
 - Never print generated TOTP codes to logs (it trips safety tooling).
 - Auth0 SSO cookies expire in ~15h; the app session (`AUTH_X_TOKEN`) lasts ~30 days
   nominally, but the server can invalidate sooner — so we **reuse the saved session and
@@ -92,7 +93,8 @@ Two internal endpoints, both authenticated the same way.
 3. Read the **`sm_xsrf_token`** cookie and send it as header **`x-xsrf-token`** on each
    POST (cookies ride along automatically). Without it → `401 "xsrf token missing"`.
 
-The client reuses the saved session and re-logs in once on a 401 (`withGraphqlAuth`).
+The client reuses the saved session and re-logs in once on a 401 (`withGraphqlAuth`); a
+`step_up_required` 403 instead fails fast so the outer retry can start fresh (see §7.2).
 
 ### 3.2 Availability — `roomTypeDates`
 
@@ -163,9 +165,10 @@ title on the first message only):
 ...
 ```
 
-- **Top-up nudge:** for `SM_TOPUP_ROOMS` (default **Superior Double, Deluxe Double**),
-  a `còn = 0` night gets `---> sales cân nhắc top up`.
-- If nothing new: `✅ Không có booking mới từ hôm qua đến hiện tại.`
+- **Top-up nudge:** for rooms listed in `SM_TOPUP_ROOMS`, a `còn = 0` night gets
+  `---> sales cân nhắc top up`. **Disabled by default** (empty); set e.g.
+  `SM_TOPUP_ROOMS="Superior Double,Deluxe Double"` to enable.
+- If nothing new: `✅ Không có booking mới nào đến thời điểm hiện tại.`
 
 ---
 
@@ -184,19 +187,55 @@ with `{ chat_id, text }` (axios), configured by `ZALO_BOT_TOKEN` + `ZALO_CHAT_ID
 
 ## 7. Deployment (GitHub Actions)
 
-`.github/workflows/report.yml` runs `src/report.js`:
-- **Triggers:** daily cron (`0 1 * * *` = 08:00 VN), manual `workflow_dispatch`, and
-  external `repository_dispatch` (`event_type: run-report`, e.g. cron-job.org).
+`.github/workflows/report.yml` runs `src/report.js` on an ephemeral `ubuntu-latest` runner.
+
+- **Triggers:** manual `workflow_dispatch`, and external `repository_dispatch`
+  (`event_type: run-report`). GitHub's own `schedule:` cron was **removed** — scheduling is
+  driven by **cron-job.org**, which POSTs daily (in Asia/Ho_Chi_Minh) to
+  `https://api.github.com/repos/<owner>/<repo>/dispatches` with body
+  `{"event_type":"run-report"}`. That request uses a GitHub **fine-grained token** with
+  **Contents: Read and write** (stored in cron-job.org). A successful trigger returns HTTP
+  204. Trade-off: fine-grained tokens expire within 1 year and must be rotated (GitHub
+  emails a reminder); GitHub's native cron needs no token but is UTC-only.
 - **Steps:** checkout → setup Node 20 → `npm ci` → `npx playwright install --with-deps
-  chromium` → restore dedupe cache → run → save dedupe cache.
-- **Dedupe persistence:** `state/seenReservations.json` is carried between runs via
-  `actions/cache` (not git). First run has no cache → full window reported.
-- **Secrets** (repo → Settings → Secrets and variables → Actions): `SM_USER`, `SM_PASS`,
+  chromium` → run report (with retry, below) → commit the dedupe log back.
+- **Secrets** (Settings → Secrets and variables → Actions): `SM_USER`, `SM_PASS`,
   `SM_TOTP_SECRET`, `SM_SPID`, `ZALO_BOT_TOKEN`, `ZALO_CHAT_ID`. Non-secret config
   (`SM_DAYS=450`, `SM_DEVICE_TRUST=skip`, `SM_HEADFUL=false`) is set in the workflow env.
+- **Workflow permissions:** the job declares `permissions: contents: write`, and the repo
+  must be set to **Settings → Actions → General → Workflow permissions → "Read and write"**
+  so the dedupe commit-back can push.
 
 The runner logs in fresh each run (ephemeral, no persisted session). Because device trust
 is `skip`, SiteMinder emails a "new device" notice each run (harmless, ignored).
+
+### 7.1 Dedupe persistence (repo-tracked)
+
+`state/seenReservations.json` is **tracked in the repo** (a negation in `.gitignore`;
+`storageState.json` stays ignored). Each run reads it, updates it, and a final step
+**commits it back** (`chore: update dedupe log [skip ci]`). This replaced an earlier
+`actions/cache` approach so the log can be **viewed and edited directly** in the repo —
+empty it (`{"sourceIds":[]}`) to force a full re-report, or remove specific IDs to
+re-report just those.
+
+### 7.2 Intermittent `step_up_required` and auto-retry
+
+From GitHub's **datacenter IP** with an untrusted (`skip`) session, SiteMinder's risk
+engine **intermittently** returns `403 {"code":"step_up_required"}` on the data call —
+even though the **login itself succeeds**. It never happens from a residential IP, which
+is why it only surfaced on Actions. Handling:
+
+- **`graphql.js`** — a `step_up_required` 403 **throws and exits** instead of attempting an
+  in-process re-login. (A re-login can't clear step-up, and a second TOTP within the same
+  30-second window is rejected → a `/mfa` timeout.) Genuine session-expiry 401s still
+  re-login once.
+- **workflow** — the run step retries up to **3 times, 90s apart**, deleting
+  `state/storageState.json` before each attempt so every try is a **fresh login** (new
+  session + a new TOTP code). Because the step-up is intermittent, one attempt usually
+  clears it — no manual re-run.
+
+If step-up ever becomes **persistent** (all 3 attempts fail), the fix is a **self-hosted
+runner** on a residential/stable IP, where `skip` mode always works.
 
 ---
 
@@ -238,7 +277,7 @@ roomMappings.json        SiteMinder name → per-channel OTA room name (6 OTAs +
 | `SM_DAYS` | 365 (450 in prod) | availability horizon (days) |
 | `SM_CHUNK_DAYS` | 30 | availability request window size |
 | `SM_DEVICE_TRUST` | skip | `skip` or `confirm` (Gmail) |
-| `SM_TOPUP_ROOMS` | Superior Double, Deluxe Double | rooms that get the top-up note at `còn=0` |
+| `SM_TOPUP_ROOMS` | (empty = disabled) | rooms that get the top-up note at `còn=0` |
 | `SM_HEADFUL` / `SM_SLOWMO` / `SM_KEEP_OPEN_MS` | false / 0 / 0 | debugging (watch the browser) |
 | `GMAIL_USER` / `GMAIL_APP_PASSWORD` | — | IMAP mailbox for `confirm` mode |
 | `ZALO_BOT_TOKEN` / `ZALO_CHAT_ID` | — | Zalo delivery |
@@ -252,5 +291,6 @@ roomMappings.json        SiteMinder name → per-channel OTA room name (6 OTAs +
   GraphQL operation to add.
 - **Cancellations/modifications** — currently skipped; could be reported separately.
 - **Multi-message marker** — an optional `(1/N)` indicator on split reports.
-- **Session on Actions** — not persisted (ephemeral), so each run logs in afresh and
-  triggers a device-notice email. A persistent host (self-hosted runner) would avoid both.
+- **Datacenter-IP step-up** — handled by the auto-retry (§7.2); a *persistent* occurrence
+  would require a self-hosted runner (residential IP). Each fresh login also triggers a
+  "new device" email (skip mode).
