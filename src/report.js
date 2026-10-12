@@ -254,15 +254,14 @@ function guestName(g) {
     for (const line of bucket.bookings.values()) sec.push(line);
     return sec.join("\n");
   });
-  // Cancellations go in their own section at the end.
-  if (cancellations.length) sections.push(["❌ Hủy phòng:", ...cancellations].join("\n"));
+  const bookingReport = sections.length === 0
+    ? `${title}\n\n✅ Không có booking mới nào đến thời điểm hiện tại.`
+    : `${title}\n\n` + sections.join(`\n${SEP}\n`);
 
-  let report;
-  if (sections.length === 0) {
-    report = `${title}\n\n✅ Không có booking mới nào đến thời điểm hiện tại.`;
-  } else {
-    report = `${title}\n\n` + sections.join(`\n${SEP}\n`);
-  }
+  // Cancellations are a SEPARATE message, sent only when there are any.
+  const cancelReport = cancellations.length
+    ? `❌ Hủy phòng ngày ${ddmmyyyy(todayISO)}:\n\n` + cancellations.join(`\n${SEP}\n`)
+    : null;
 
   // persist seen (rolling 100) and send
   if (newSourceIds.length) saveSeen(seen.concat(newSourceIds));
@@ -271,6 +270,10 @@ function guestName(g) {
     for (const u of unmapped) console.log(`   [${u.channel}] ${u.roomName}  (src ${u.sourceId})`);
   }
 
-  console.log("\n===== REPORT =====\n" + report + "\n==================\n");
-  await sendToZalo(report);
+  console.log("\n===== BOOKINGS =====\n" + bookingReport + "\n");
+  await sendToZalo(bookingReport);
+  if (cancelReport) {
+    console.log("\n===== CANCELLATIONS =====\n" + cancelReport + "\n");
+    await sendToZalo(cancelReport);
+  }
 })().catch((e) => { console.error("❌", e.message); process.exit(1); });
