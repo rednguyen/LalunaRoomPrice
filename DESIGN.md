@@ -170,13 +170,20 @@ Message 1 — **bookings** (always sent):
 📊 Báo Cáo OTA Sales ngày 12-10-2026:
 
 🛏️ Superior Double:
-📅 Ngày 24-10-2026: bán 1 | còn 2
+📅 24/10 còn 2 · 25/10 còn 1 (bán 1)
 👤 Booking.com - 6010480449 | Lydia Mawdsley
    💰 1.491.950đ/đêm · 24→26/10 · tổng 2.983.900đ
 ----------------------------------------
 🛏️ Deluxe Double:
 ...
 ```
+Night lines (`nightLines`) are compact: **one 📅 line per run of consecutive nights** (across
+all of that room's bookings, since bán/còn are per-night totals). Within a run, adjacent nights
+with the same bán + còn merge into an **inclusive** range (`01–03/03` = nights 1, 2, 3 — an en
+dash, unlike the booking line's `→` check-in→check-out). No year; lines are date-sorted. If bán
+is equal across the run it's written once at the end (`(bán 1)`), otherwise per group
+(`14/12 bán 1 còn 2 · 15/12 bán 2 còn 0`).
+
 Each booking's 2nd line is the **per-room nightly rate** (`total ÷ rooms ÷ nights`), the
 **stay range** (check-in → check-out), and the **full booking total** (all rooms, all nights —
 `totalAmount.amountAfterTax`).
@@ -189,8 +196,8 @@ Message 2 — **cancellations** (sent only when there are any):
    🛏️ Family Pool View (DLX) · 19→21/08 · 💰 11.375.316đ
 ```
 
-- **Top-up nudge:** for rooms listed in `SM_TOPUP_ROOMS`, a `còn = 0` night gets
-  `---> sales cân nhắc top up`. **Disabled by default** (empty); set e.g.
+- **Top-up nudge:** for rooms listed in `SM_TOPUP_ROOMS`, a 📅 line containing any `còn 0`
+  night gets `-> sales cân nhắc top up`. **Disabled by default** (empty); set e.g.
   `SM_TOPUP_ROOMS="Superior Double,Deluxe Double"` to enable.
 - If nothing new: `✅ Không có booking mới nào đến thời điểm hiện tại.`
 

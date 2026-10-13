@@ -82,6 +82,35 @@ function stayRange(fromISO, checkOutISO) {
   return fm === tm && fy === ty ? `${fd}→${td}/${fm}` : `${fd}/${fm}→${td}/${tm}`;
 }
 
+// Compact night lines: one line per run of consecutive nights; within a run, adjacent
+// nights with the same bán/còn merge into an inclusive range ("01–03/03"). If bán is the
+// same across the run it's written once at the end, e.g.
+//   "01–03/03 còn 0 · 04/03 còn 1 (bán 1)"   else   "14/12 bán 1 còn 2 · 15/12 bán 2 còn 0"
+function nightLines(soldByDate, availFor) {
+  const short = (d) => `${d.slice(8)}/${d.slice(5, 7)}`;
+  const span = (a, b) => a === b ? short(a)
+    : a.slice(0, 7) === b.slice(0, 7) ? `${a.slice(8)}–${short(b)}` : `${short(a)}–${short(b)}`;
+  const runs = [];
+  for (const date of [...soldByDate.keys()].sort()) {
+    const sold = soldByDate.get(date);
+    const left = availFor(date);
+    const run = runs[runs.length - 1];
+    const g = run && run.groups[run.groups.length - 1];
+    if (!run || addDaysISO(g.to, 1) !== date) runs.push({ groups: [{ from: date, to: date, sold, left }] });
+    else if (g.sold === sold && g.left === left) g.to = date;
+    else run.groups.push({ from: date, to: date, sold, left });
+  }
+  return runs.map(({ groups }) => {
+    const oneSold = groups.every((g) => g.sold === groups[0].sold);
+    const parts = groups.map((g) =>
+      `${span(g.from, g.to)}${oneSold ? "" : ` bán ${g.sold}`} còn ${g.left === undefined ? "?" : g.left}`);
+    return {
+      text: parts.join(" · ") + (oneSold ? ` (bán ${groups[0].sold})` : ""),
+      hasZero: groups.some((g) => g.left === 0),
+    };
+  });
+}
+
 // ---- mapping: channel.name + roomName -> SiteMinder room type ----
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 function resolveChannelKey(channelName) {
@@ -244,11 +273,9 @@ function guestName(g) {
     const bucket = perRoom.get(smName);
     const uuid = uuidByName.get(smName);
     const sec = [`🛏️ ${smName}:`];
-    for (const date of [...bucket.nights.keys()].sort()) {
-      const sold = bucket.nights.get(date);
-      const left = avail.get(`${uuid}|${date}`);
-      let line = `📅 Ngày ${ddmmyyyy(date)}: bán ${sold} | còn ${left === undefined ? "?" : left}`;
-      if (left === 0 && TOP_UP_ROOMS.has(smName)) line += " -> sales cân nhắc top up";
+    for (const run of nightLines(bucket.nights, (date) => avail.get(`${uuid}|${date}`))) {
+      let line = `📅 ${run.text}`;
+      if (run.hasZero && TOP_UP_ROOMS.has(smName)) line += " -> sales cân nhắc top up";
       sec.push(line);
     }
     for (const line of bucket.bookings.values()) sec.push(line);
