@@ -193,12 +193,12 @@ function guestName(g) {
     // Only report nights from today onward (skip yesterday/past nights).
     const stayNights = allNights.filter((n) => n >= todayISO);
 
-    // Per-room figures: reservation total / #rooms (÷ #nights for the nightly rate).
+    // Nightly rate is per room (total / #rooms / #nights); "tổng" is the full booking total.
     const numNights = allNights.length || 1;
     const numRooms = (r.roomStays || []).length || 1;
     const amt = r.totalAmount && r.totalAmount.amountAfterTax;
     const priceLine = amt != null
-      ? `\n   💰 ${fmtMoney(amt / numRooms / numNights, r.currency)}/đêm · ${stayRange(r.fromDate, checkOut)} · tổng ${fmtMoney(amt / numRooms, r.currency)}`
+      ? `\n   💰 ${fmtMoney(amt / numRooms / numNights, r.currency)}/đêm · ${stayRange(r.fromDate, checkOut)} · tổng ${fmtMoney(amt, r.currency)}`
       : "";
 
     let mappedAny = false;

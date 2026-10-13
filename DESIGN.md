@@ -178,7 +178,8 @@ Message 1 — **bookings** (always sent):
 ...
 ```
 Each booking's 2nd line is the **per-room nightly rate** (`total ÷ rooms ÷ nights`), the
-**stay range** (check-in → check-out), and the per-room **total**.
+**stay range** (check-in → check-out), and the **full booking total** (all rooms, all nights —
+`totalAmount.amountAfterTax`).
 
 Message 2 — **cancellations** (sent only when there are any):
 ```
