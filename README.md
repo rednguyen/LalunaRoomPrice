@@ -98,8 +98,9 @@ per date. Overwritten every run.
 
 ## Security
 
-- `.env`, `state/`, and `data/` are gitignored — credentials, the live session, and
-  business data never get committed.
+- `.env`, `data/`, and `state/storageState.json` are gitignored — credentials, the live
+  session, and business data never get committed. (`state/seenReservations.json`, the
+  dedupe log, is tracked on purpose so the workflow can persist it.)
 - The session file holds live tokens; don't copy it anywhere public.
 
 ## Daily OTA Sales report
@@ -107,28 +108,48 @@ per date. Overwritten every run.
 `node src/report.js` builds the "Báo Cáo OTA Sales" report and sends it to a Zalo
 group. It pulls availability (next `SM_DAYS`) + reservations booked yesterday→now
 (Vietnam time), dedupes against `state/seenReservations.json` (rolling last 100
-`sourceId`s), maps each OTA room back to a SiteMinder room via `roomMappings.json`,
-and reports rooms sold per room type per night (`bán | còn`) with the booking list.
-Messages are split to stay under Zalo's 2000-char limit.
+keys), maps each OTA room back to a SiteMinder room via `roomMappings.json`, and
+reports rooms sold (`bán`) and rooms left (`còn`) per room type per night, with the
+booking list. Example:
+
+```
+📊 Báo Cáo OTA Sales ngày 13-10-2026:
+
+🛏️ Deluxe Double:
+📅 01–03/03 còn 0 · 04/03 còn 1 · 05–06/03 còn 2 · 07/03 còn 3 (bán 1)
+📅 16–17/03 còn 0 · 18/03 còn 2 · 19/03 còn 0 (bán 1)
+👤 Agoda - 1785446839 | yejun koo
+   💰 2.062.937đ/đêm · 01→03/03 · tổng 4.125.874đ
+...
+```
+
+- **📅 lines:** one line per run of consecutive nights; nights with the same bán/còn
+  merge into an inclusive range (`01–03/03` = nights 1, 2, 3). No year. `(bán N)` at
+  the end when bán is the same for the whole line, otherwise each group shows its own.
+- **💰 line:** per-room nightly rate (`total ÷ rooms ÷ nights`), stay as
+  check-in→check-out, and `tổng` = the **full booking total** (all rooms, all nights).
+- **Cancellations** go in a separate **❌ Hủy phòng** message, sent only when there
+  are any. Modifications are skipped.
+- Messages are split to stay under Zalo's 2000-char limit.
 
 Config: `SM_SPID`, `SM_DAYS`, `SM_TOPUP_ROOMS` (rooms that get a "top up" note when
 `còn=0`), `ZALO_BOT_TOKEN`, `ZALO_CHAT_ID`. Device trust is `skip` (untrusted session).
 
 ## Automated schedule (GitHub Actions)
 
-`.github/workflows/report.yml` runs `src/report.js` on a daily cron (01:00 UTC =
-08:00 Vietnam), on manual dispatch, or via an external `repository_dispatch`
-(`event_type: run-report`, e.g. from cron-job.org). The dedupe file is persisted
-between runs with `actions/cache`.
+`.github/workflows/report.yml` runs `src/report.js` on manual dispatch or via an
+external `repository_dispatch` (`event_type: run-report`), which **cron-job.org**
+sends daily. There is no GitHub `schedule:` cron. Each run logs in fresh, retries up
+to 3 times (90s apart) if SiteMinder asks for a step-up check, and commits the updated
+`state/seenReservations.json` back to the repo (`chore: update dedupe log`).
 
 Add these repository **secrets** (Settings → Secrets and variables → Actions):
 `SM_USER`, `SM_PASS`, `SM_TOTP_SECRET`, `SM_SPID`, `ZALO_BOT_TOKEN`, `ZALO_CHAT_ID`.
 
-> Note: GitHub-hosted runners use datacenter IPs, where SiteMinder's Cloudflare may
-> challenge the login (untested). If that happens, run the workflow on a **self-hosted
-> runner** (e.g. a home machine / cheap VPS) for a residential/stable IP.
+See [DESIGN.md](DESIGN.md) for the full design.
 
 ## Not done yet
 
 - **Rates/prices** — only availability + reservations so far; rates are a separate
   GraphQL operation to be added.
+- **Modifications** — modified bookings are not reported yet.

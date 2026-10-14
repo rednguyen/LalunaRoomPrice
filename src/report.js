@@ -2,9 +2,10 @@
 //
 // Step 1: availability (roomTypeDates) for the next N days  -> "còn" source.
 // Step 2: reservations booked yesterday->now (Asia/Ho_Chi_Minh), deduped by
-//         sourceId (rolling last 100). Skip cancelled/modified for now.
-// Then aggregate rooms sold per SiteMinder room type per stay-night and format
-// the report, and hand it to the Zalo sender.
+//         sourceId (rolling last 100). Modifications are skipped for now.
+// Step 3: cancellations (by cancellation date), deduped as "<sourceId>|C".
+// Then aggregate rooms sold per SiteMinder room type per stay-night, format the
+// bookings report (+ a separate cancellations report) and hand them to Zalo.
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");

@@ -333,3 +333,15 @@ roomMappings.json        SiteMinder name → per-channel OTA room name (6 OTAs +
 - **Datacenter-IP step-up** — handled by the auto-retry (§7.2); a *persistent* occurrence
   would require a self-hosted runner (residential IP). Each fresh login also triggers a
   "new device" email (skip mode).
+
+---
+
+## 12. Changelog (report format)
+
+- **2026-10-13 — `tổng` is the full booking total.** It used to be the per-room total
+  (`total ÷ rooms`), which under-stated multi-room bookings (e.g. a 2-room Agoda booking of
+  5.451.016đ showed `tổng 2.725.508đ`). The nightly rate is still per room.
+- **2026-10-13 — compact 📅 night lines.** Replaced one line per night
+  (`📅 Ngày 01-03-2027: bán 1 | còn 0`) with one line per run of consecutive nights, merged
+  ranges and no year (`📅 01–03/03 còn 0 · 04/03 còn 1 (bán 1)`) — see §5. A real report's
+  date section went from 20 lines to 6.
