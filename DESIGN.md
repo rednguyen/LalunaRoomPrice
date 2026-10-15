@@ -215,6 +215,11 @@ with `{ chat_id, text }` (axios), configured by `ZALO_BOT_TOKEN` + `ZALO_CHAT_ID
   falls back to line-splitting). The **title appears on the first message only** of each report.
 - If the token/chat id aren't set, it prints the report instead (so the pipeline is
   testable without sending).
+- **Send first, then mark seen.** IDs are written to the dedupe log only after their report
+  reaches Zalo. A failed send exits non-zero, so the workflow retry (§7.2) re-sends it rather
+  than the bookings being silently lost. Bookings and cancellations are persisted separately,
+  so a failed cancellations send doesn't re-send the bookings report. (A send that fails
+  midway through a multi-message report re-sends the parts that already went out.)
 
 ---
 

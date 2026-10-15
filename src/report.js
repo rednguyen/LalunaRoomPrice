@@ -206,7 +206,8 @@ function guestName(g) {
   // perRoom: smName -> { nights: Map(date->count), bookings: Map(sourceId->line) }
   const perRoom = new Map();
   const unmapped = [];
-  const newSourceIds = [];
+  const newSourceIds = [];   // bookings consumed by this run
+  const newCancelKeys = [];  // "<sourceId>|C" keys consumed by this run
   const cancellations = [];
 
   for (const r of reservations) {
@@ -252,7 +253,7 @@ function guestName(g) {
   for (const r of cancelled) {
     const ckey = `${r.sourceId}|C`;
     if (seenSet.has(ckey)) continue;
-    newSourceIds.push(ckey);
+    newCancelKeys.push(ckey);
     const chKey = resolveChannelKey(r.channel && r.channel.name);
     const checkOut = r.checkOutDate || r.toDate;
     const rooms = [...new Set((r.roomStays || []).map((rs) => resolveRoomType(chKey, rs.roomName) || rs.roomName))];
@@ -291,17 +292,25 @@ function guestName(g) {
     ? `❌ Hủy phòng ngày ${ddmmyyyy(todayISO)}:\n\n` + cancellations.join(`\n${SEP}\n`)
     : null;
 
-  // persist seen (rolling 100) and send
-  if (newSourceIds.length) saveSeen(seen.concat(newSourceIds));
   if (unmapped.length) {
     console.log(`\n⚠️ ${unmapped.length} unmapped room stay(s):`);
     for (const u of unmapped) console.log(`   [${u.channel}] ${u.roomName}  (src ${u.sourceId})`);
   }
 
+  // Send FIRST, then persist seen (rolling 100): IDs are only marked reported once their
+  // report reached Zalo, so a failed send exits non-zero and the workflow retry re-sends
+  // it instead of the bookings being silently lost. Each report is persisted on its own,
+  // so a cancellations failure doesn't re-send an already-delivered bookings report.
+  // ("not-configured" = local run that just prints the report; treated as delivered.)
+  const delivered = (res) => res.sent || res.reason === "not-configured";
+
   console.log("\n===== BOOKINGS =====\n" + bookingReport + "\n");
-  await sendToZalo(bookingReport);
+  if (!delivered(await sendToZalo(bookingReport))) throw new Error("Zalo send failed (bookings) — not marked as reported; will retry.");
+  if (newSourceIds.length) { seen.push(...newSourceIds); saveSeen(seen); }
+
   if (cancelReport) {
     console.log("\n===== CANCELLATIONS =====\n" + cancelReport + "\n");
-    await sendToZalo(cancelReport);
+    if (!delivered(await sendToZalo(cancelReport))) throw new Error("Zalo send failed (cancellations) — not marked as reported; will retry.");
   }
+  if (newCancelKeys.length) { seen.push(...newCancelKeys); saveSeen(seen); }
 })().catch((e) => { console.error("❌", e.message); process.exit(1); });
