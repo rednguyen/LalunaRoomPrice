@@ -116,8 +116,16 @@ async function signIn(page) {
       .then(() => true).catch(() => false);
     if (onTrustScreen) {
       const waitMs = Number(process.env.SM_TRUST_WAIT_MS || 300000);
-      console.log(`   Trusted-device screen — click the link in SiteMinder's email (waiting up to ${waitMs / 60000} min)…`);
-      await page.waitForURL((u) => !/trusted-device-setup/.test(u.href), { timeout: waitMs }).catch(() => {
+      // "Trust this device for faster logins": the confirmation email is only sent once
+      // "Make trusted device" is clicked (some logins send it straight away, no button).
+      const makeTrusted = page.locator('button:has-text("Make trusted device"), a:has-text("Make trusted device")').first();
+      if (await makeTrusted.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await makeTrusted.click();
+        console.log('   Clicked "Make trusted device" — SiteMinder is emailing the confirmation link.');
+      }
+      console.log(`   Click the link in SiteMinder's email (waiting up to ${waitMs / 60000} min)…`);
+      // Done when the login reaches the app (an intermediate "check your email" page doesn't count).
+      await page.waitForURL(CFG.successGlob, { timeout: waitMs }).catch(() => {
         throw new Error(`Device not confirmed within ${waitMs / 60000} min`);
       });
       console.log("   Device confirmed.");
