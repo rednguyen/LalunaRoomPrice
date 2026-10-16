@@ -78,7 +78,8 @@ jobs:
           SM_HEADFUL: "false"
           # zalo: no → no token, so src/zalo.js prints the reports instead of posting them.
           # (Cron runs have no inputs: null != 'no', so they always post.)
-          ZALO_BOT_TOKEN: ${{ inputs.zalo == 'no' && '' || secrets.ZALO_BOT_TOKEN }}
+          # Order matters: `cond && '' || x` always yields x ('' is falsy), so the token comes first.
+          ZALO_BOT_TOKEN: ${{ inputs.zalo != 'no' && secrets.ZALO_BOT_TOKEN || '' }}
           REPORT_NO_SAVE: ${{ inputs.zalo == 'no' && 'true' || '' }}   # test run: don't mark anything reported
           ZALO_CHAT_ID: ${{ secrets.ZALO_CHAT_ID }}
           # VPS only: the trusted SiteMinder profile (reveals guest emails) + guest emails.
