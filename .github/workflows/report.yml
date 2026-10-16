@@ -10,6 +10,11 @@ on:
         type: choice
         options: [vps, github]
         default: vps
+      zalo:
+        description: "Post the reports to Zalo (no = print them in the run log only)"
+        type: choice
+        options: ["yes", "no"]
+        default: "yes"
   # Scheduled trigger comes from cron-job.org via the GitHub API:
   #   POST /repos/<owner>/<repo>/dispatches  { "event_type": "run-report" }
   repository_dispatch:
@@ -67,7 +72,9 @@ jobs:
           SM_DEVICE_TRUST: skip
           SM_SUCCESS_URL_GLOB: https://platform.siteminder.com/**
           SM_HEADFUL: "false"
-          ZALO_BOT_TOKEN: ${{ secrets.ZALO_BOT_TOKEN }}
+          # zalo: no → no token, so src/zalo.js prints the reports instead of posting them.
+          # (Cron runs have no inputs: null != 'no', so they always post.)
+          ZALO_BOT_TOKEN: ${{ inputs.zalo == 'no' && '' || secrets.ZALO_BOT_TOKEN }}
           ZALO_CHAT_ID: ${{ secrets.ZALO_CHAT_ID }}
           # VPS only: the trusted SiteMinder profile (reveals guest emails) + guest emails.
           SM_PROFILE_DIR: ${{ env.ON_VPS == 'true' && '/home/laluna/sm-profile' || '' }}
