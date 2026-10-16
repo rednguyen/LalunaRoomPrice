@@ -50,7 +50,7 @@ fi
 # --no-sandbox: Ubuntu 24.04's AppArmor blocks Chromium's sandbox ("No usable sandbox!");
 # Playwright starts the bot's Chromium with it too, so this matches the bot exactly.
 exec "\$CHROME" --user-data-dir=$HOME_DIR/sm-profile --password-store=basic --use-mock-keychain --no-sandbox \\
-  --user-agent="$UA" --no-first-run https://property.siteminder.com/
+  --user-agent="$UA" --no-first-run https://authx.siteminder.com/login
 EOF
 chmod +x "$HOME_DIR/sm-browser.sh"
 install -d -o "$BOT_USER" -g "$BOT_USER" "$HOME_DIR/Desktop"

@@ -19,8 +19,21 @@ async function withGraphql(fn) {
   const { ctx, close } = await openBrowser({ storageState: CFG.stateFile });
   const page = await ctx.newPage();
   try {
-    await page.goto(DASHBOARD(SPID), { waitUntil: "domcontentloaded", timeout: 45000 });
-    await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
+    if (CFG.profileDir) {
+      // Persistent (VPS) profile: start where a person would — SiteMinder's login address.
+      // A logged-in, trusted profile then walks SiteMinder's hand-off by itself (authx
+      // /authenticated → /authenticate?userDeviceToken=… → a brief …/forbidden → re-authorise)
+      // and lands on the dashboard (~10 s on the VPS). Opening the dashboard URL directly skips
+      // that hand-off. If the login form shows instead, the session is gone → log in.
+      await page.goto(CFG.loginUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+      const onDashboard = (u) => u.hostname === "platform.siteminder.com" && u.pathname.startsWith("/dashboard/");
+      const landed = await page.waitForURL(onDashboard, { timeout: 60000 }).then(() => true, () => false);
+      if (!landed) throw new AuthError(`didn't reach the dashboard from the login page (stopped on ${new URL(page.url()).pathname})`);
+      await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
+    } else {
+      await page.goto(DASHBOARD(SPID), { waitUntil: "domcontentloaded", timeout: 45000 });
+      await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
+    }
     await page.waitForTimeout(1000);
 
     if (/\/login/.test(page.url())) throw new AuthError("redirected to login");
