@@ -23,25 +23,12 @@ async function withGraphql(fn) {
       // Persistent (VPS) profile: start where a person would — SiteMinder's login address.
       // A logged-in, trusted profile then walks SiteMinder's hand-off by itself (authx
       // /authenticated → /authenticate?userDeviceToken=… → a brief …/forbidden → re-authorise)
-      // and lands on the dashboard. Opening the dashboard URL directly skips that hand-off.
-      // SiteMinder's property site often loops here (createTrustedDevice 401 "access token
-      // missing" → back to login → …, seen ~16 rounds / ~45 s on the VPS) before it gets
-      // through, so wait patiently. Only a login FORM that stays up means the session is gone.
+      // and lands on the dashboard (~10 s on the VPS). Opening the dashboard URL directly skips
+      // that hand-off. If the login form shows instead, the session is gone → log in.
       await page.goto(CFG.loginUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
-      const email = page.locator('input[type="email"], input[name="username"], input[name="email"], input#email').first();
-      let formSeconds = 0;
-      for (let t = 0; t < 120; t++) {
-        const u = new URL(page.url());
-        if (u.hostname === "platform.siteminder.com" && u.pathname.startsWith("/dashboard/")) break;
-        // During the loop the login page only flashes by; a form shown for 5 s straight is real.
-        formSeconds = (u.pathname === "/login" && await email.isVisible().catch(() => false)) ? formSeconds + 1 : 0;
-        if (formSeconds >= 5) throw new AuthError("login form shown — the profile isn't logged in");
-        await page.waitForTimeout(1000);
-      }
-      const at = new URL(page.url());
-      if (!(at.hostname === "platform.siteminder.com" && at.pathname.startsWith("/dashboard/"))) {
-        throw new AuthError(`didn't reach the dashboard within 2 min (stopped on ${at.pathname})`);
-      }
+      const onDashboard = (u) => u.hostname === "platform.siteminder.com" && u.pathname.startsWith("/dashboard/");
+      const landed = await page.waitForURL(onDashboard, { timeout: 60000 }).then(() => true, () => false);
+      if (!landed) throw new AuthError(`didn't reach the dashboard from the login page (stopped on ${new URL(page.url()).pathname})`);
       await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
     } else {
       await page.goto(DASHBOARD(SPID), { waitUntil: "domcontentloaded", timeout: 45000 });
@@ -86,9 +73,7 @@ async function withGraphql(fn) {
 
 // Reuse the saved session; log in if it's missing or expired, then retry once.
 async function withGraphqlAuth(fn) {
-  // Persistent (VPS) profile: the profile itself holds the session (the state file isn't used),
-  // so go straight in — withGraphql reports AuthError if SiteMinder really shows the login form.
-  if (!CFG.profileDir && !fs.existsSync(CFG.stateFile)) {
+  if (!fs.existsSync(CFG.stateFile)) {
     console.log("No saved session — logging in…");
     await login();
   }
