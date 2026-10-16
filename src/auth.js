@@ -139,6 +139,10 @@ async function login() {
   fs.mkdirSync(path.dirname(CFG.stateFile), { recursive: true });
 
   const { ctx, close } = await openBrowser();
+  // Trusting the device: start from a fresh sign-in, or a profile still logged in from an
+  // untrusted ("Skip") run would never reach the "trusted device" screen. Only cookies go —
+  // the device key in IndexedDB stays, so an already-trusted device just isn't asked again.
+  if (CFG.deviceTrust === "manual") await ctx.clearCookies();
   const page = await ctx.newPage();
 
   try {
