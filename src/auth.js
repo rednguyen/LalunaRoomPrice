@@ -149,13 +149,24 @@ async function login() {
   requireEnv();
   fs.mkdirSync(path.dirname(CFG.stateFile), { recursive: true });
 
-  const { ctx, close } = await openBrowser();
+  const br = await openBrowser();
+  const { ctx, close } = br;
+  // Attach mode: the always-open browser already has a tab (on the dashboard). After we clear
+  // cookies below, that tab bounces to its own login and fights THIS flow for Auth0's shared,
+  // cookie-based login state — the sign-in then hangs forever on "Loading…". So drive that
+  // single existing tab and close any others: exactly one login in flight.
+  let page;
+  if (br.attached) {
+    const pages = ctx.pages();
+    page = pages[0] || (await ctx.newPage());
+    for (const p of pages.slice(1)) await p.close().catch(() => {});
+  } else {
+    page = await ctx.newPage();
+  }
   // Trusting the device: start from a fresh sign-in, or a session still logged in from an
   // untrusted ("Skip") run would never reach the "trusted device" screen. Only cookies go —
   // the device key in IndexedDB stays, so an already-trusted device just isn't asked again.
-  // In attach mode this clears the always-open browser's cookies so it re-enrolls cleanly.
   if (CFG.deviceTrust === "manual") await ctx.clearCookies();
-  const page = await ctx.newPage();
 
   try {
     await page.goto(CFG.loginUrl,{ waitUntil: "domcontentloaded", timeout: 45000 });
