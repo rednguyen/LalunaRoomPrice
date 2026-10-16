@@ -23,9 +23,6 @@ const CFG = {
   stateFile: process.env.SM_STATE_FILE || "state/storageState.json",
   // Optional persistent browser profile (see openBrowser). Keep it outside the repo.
   profileDir: process.env.SM_PROFILE_DIR,
-  // Optional: attach to an always-open, already-trusted browser instead of launching one
-  // (SM_CDP_URL, e.g. http://127.0.0.1:9222). The one browser stays the trusted device.
-  cdpUrl: process.env.SM_CDP_URL,
   headful: String(process.env.SM_HEADFUL).toLowerCase() === "true",
   // "skip" = log in as an untrusted session-only device (default);
   // "manual" = wait on the trusted-device screen for a human to click the email link.
@@ -149,24 +146,12 @@ async function login() {
   requireEnv();
   fs.mkdirSync(path.dirname(CFG.stateFile), { recursive: true });
 
-  const br = await openBrowser();
-  const { ctx, close } = br;
-  // Attach mode: the always-open browser already has a tab (on the dashboard). After we clear
-  // cookies below, that tab bounces to its own login and fights THIS flow for Auth0's shared,
-  // cookie-based login state — the sign-in then hangs forever on "Loading…". So drive that
-  // single existing tab and close any others: exactly one login in flight.
-  let page;
-  if (br.attached) {
-    const pages = ctx.pages();
-    page = pages[0] || (await ctx.newPage());
-    for (const p of pages.slice(1)) await p.close().catch(() => {});
-  } else {
-    page = await ctx.newPage();
-  }
-  // Trusting the device: start from a fresh sign-in, or a session still logged in from an
+  const { ctx, close } = await openBrowser();
+  // Trusting the device: start from a fresh sign-in, or a profile still logged in from an
   // untrusted ("Skip") run would never reach the "trusted device" screen. Only cookies go —
   // the device key in IndexedDB stays, so an already-trusted device just isn't asked again.
   if (CFG.deviceTrust === "manual") await ctx.clearCookies();
+  const page = await ctx.newPage();
 
   try {
     await page.goto(CFG.loginUrl,{ waitUntil: "domcontentloaded", timeout: 45000 });
@@ -209,22 +194,6 @@ async function login() {
 // reveal guest emails). Unset: a throwaway browser per run, session carried in SM_STATE_FILE.
 async function openBrowser({ storageState } = {}) {
   const opts = { userAgent: UA, viewport: { width: 1920, height: 1080 }, locale: "en-US" };
-  // Attach to the always-open, human-trusted browser (SM_CDP_URL) instead of launching one.
-  // No fresh browser and no fresh login per run, so SiteMinder keeps seeing the single device
-  // it trusted (a fresh launch/login is what made it drop the trust). The keepalive service
-  // (deploy/sm-keepalive.sh) starts that browser with this same user agent.
-  if (CFG.cdpUrl) {
-    const browser = await chromium.connectOverCDP(CFG.cdpUrl, { slowMo: CFG.slowMo });
-    const ctx = browser.contexts()[0];
-    const before = new Set(ctx.pages());
-    return {
-      ctx, attached: true,
-      close: async () => {
-        for (const p of ctx.pages()) if (!before.has(p)) await p.close().catch(() => {});
-        await browser.close();   // over CDP this only detaches — the browser keeps running
-      },
-    };
-  }
   if (CFG.profileDir) {
     const ctx = await chromium.launchPersistentContext(CFG.profileDir, { headless: !CFG.headful, slowMo: CFG.slowMo, ...opts });
     // Auth0 leaves a "login in progress" cookie pair (com.auth0.auth.<state> + _compat, and

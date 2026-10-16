@@ -53,16 +53,22 @@ jobs:
 
       # Gentle on SiteMinder's risk checks: at most one retry, 10 min later, and none at all
       # when it asks for step-up auth (exit 3) — retrying that only adds logins.
-      # On the VPS the bot ATTACHES to the always-open, trusted browser (SM_CDP_URL, the
-      # sm-keepalive service) — no fresh launch/login, so SiteMinder keeps trusting it.
-      # At most one retry, 10 min later, and none on step-up auth (exit 3).
       - name: Run report
         run: |
           STATE="${SM_STATE_FILE:-state/storageState.json}"
           for attempt in 1 2; do
             echo "::group::Attempt $attempt"
-            [ "$ON_VPS" = "true" ] || rm -f "$STATE"   # VPS reuses the live browser; don't drop its session
-            code=0; node src/report.js || code=$?
+            rm -f "$STATE"   # re-check the login each attempt
+            code=0
+            if [ "$ON_VPS" = "true" ]; then
+              # VPS: the FULL Chromium, visible on a virtual screen — the same browser the RDP
+              # launcher uses. The headless shell looks like a different device to SiteMinder,
+              # which then discards the profile's trusted-device key.
+              command -v xvfb-run >/dev/null || { echo "xvfb missing — on the VPS run: apt-get install -y xvfb"; exit 1; }
+              xvfb-run -a -s "-screen 0 1920x1080x24" node src/report.js || code=$?
+            else
+              node src/report.js || code=$?
+            fi
             echo "::endgroup::"
             [ "$code" -eq 0 ] && exit 0
             if [ "$code" -eq 3 ]; then echo "SiteMinder wants step-up auth — not retrying."; exit 1; fi
@@ -78,9 +84,7 @@ jobs:
           SM_DAYS: "450"
           SM_DEVICE_TRUST: skip
           SM_SUCCESS_URL_GLOB: https://platform.siteminder.com/**
-          SM_HEADFUL: "false"
-          # VPS: attach to the always-open trusted browser instead of launching one.
-          SM_CDP_URL: ${{ env.ON_VPS == 'true' && 'http://127.0.0.1:9222' || '' }}
+          SM_HEADFUL: ${{ env.ON_VPS == 'true' && 'true' || 'false' }}   # VPS: visible on the xvfb screen
           # zalo: no → no token, so src/zalo.js prints the reports instead of posting them.
           # (Cron runs have no inputs: null != 'no', so they always post.)
           # Order matters: `cond && '' || x` always yields x ('' is falsy), so the token comes first.

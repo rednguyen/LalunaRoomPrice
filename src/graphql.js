@@ -16,16 +16,10 @@ class AuthError extends Error {}
 
 // Open an authenticated context and hand `fn` a runner it can call many times.
 async function withGraphql(fn) {
-  const br = await openBrowser({ storageState: CFG.stateFile });
-  const { ctx, close } = br;
+  const { ctx, close } = await openBrowser({ storageState: CFG.stateFile });
   const page = await ctx.newPage();
   try {
-    if (br.attached) {
-      // Always-open, already-logged-in browser: a new tab shares its session, so go straight
-      // to the dashboard — no re-login and no device re-check (that's what kept the trust alive).
-      await page.goto(DASHBOARD(SPID), { waitUntil: "domcontentloaded", timeout: 45000 });
-      await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
-    } else if (CFG.profileDir) {
+    if (CFG.profileDir) {
       // Persistent (VPS) profile: start where a person would — SiteMinder's login address.
       // A logged-in, trusted profile then walks SiteMinder's hand-off by itself (authx
       // /authenticated → /authenticate?userDeviceToken=… → a brief …/forbidden → re-authorise)
@@ -79,19 +73,6 @@ async function withGraphql(fn) {
 
 // Reuse the saved session; log in if it's missing or expired, then retry once.
 async function withGraphqlAuth(fn) {
-  // Attach mode (SM_CDP_URL): the always-open browser is logged in and trusted by a human
-  // (the trust workflow). The bot never logs in here — doing so would re-trigger the device
-  // check that drops the trust. If the live browser isn't logged in, say so.
-  if (CFG.cdpUrl) {
-    try {
-      return await withGraphql(fn);
-    } catch (e) {
-      if (e instanceof AuthError) {
-        throw new Error(`${e.message} — the always-open SiteMinder browser isn't logged in/trusted. Run the "Trust VPS in SiteMinder" workflow, then re-run.`);
-      }
-      throw e;
-    }
-  }
   if (!fs.existsSync(CFG.stateFile)) {
     console.log("No saved session — logging in…");
     await login();
