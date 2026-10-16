@@ -36,6 +36,12 @@ const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 
+// True once the login has really reached the app. A trusted device first passes through
+// platform.siteminder.com/authenticate?userDeviceToken=… (the app proving the device) —
+// that's still mid-login, so it doesn't count; nor does a …/forbidden page (access refused).
+const appHost = new URL(CFG.successGlob.replace(/\*+/g, "x")).hostname;
+const inApp = (u) => u.hostname === appHost && !/^\/(authenticate|login)\b/.test(u.pathname) && !/\/forbidden\b/.test(u.pathname);
+
 function requireEnv() {
   for (const k of ["user", "pass", "totp"]) {
     if (!CFG[k]) throw new Error(`Missing env: SM_${k.toUpperCase()}. See .env.example.`);
@@ -125,7 +131,7 @@ async function signIn(page) {
       }
       console.log(`   Click the link in SiteMinder's email (waiting up to ${waitMs / 60000} min)…`);
       // Done when the login reaches the app (an intermediate "check your email" page doesn't count).
-      await page.waitForURL(CFG.successGlob, { timeout: waitMs }).catch(() => {
+      await page.waitForURL(inApp, { timeout: waitMs }).catch(() => {
         throw new Error(`Device not confirmed within ${waitMs / 60000} min`);
       });
       console.log("   Device confirmed.");
@@ -147,25 +153,21 @@ async function login() {
   fs.mkdirSync(path.dirname(CFG.stateFile), { recursive: true });
 
   const { ctx, close } = await openBrowser();
-  // Trusting the device: start from a fresh sign-in, or a profile still logged in from an
-  // untrusted ("Skip") run would never reach the "trusted device" screen. Only cookies go —
-  // the device key in IndexedDB stays, so an already-trusted device just isn't asked again.
-  if (CFG.deviceTrust === "manual") await ctx.clearCookies();
+  // Always a fresh, full sign-in (password + TOTP). Re-using a profile's leftover login
+  // fails: SiteMinder runs the trusted-device steps, then answers 403 on
+  // currentUserForAuthenticate (step-up) and the app shows "An error has occurred". It also
+  // lets a manual-trust run reach the "trusted device" screen. Only cookies go — the device
+  // key in IndexedDB stays, so a trusted device stays trusted.
+  await ctx.clearCookies();
   const page = await ctx.newPage();
 
   try {
-    await page.goto(CFG.loginUrl,{ waitUntil: "domcontentloaded", timeout: 45000 });
-
-    // A persistent profile (SM_PROFILE_DIR) may still be logged in: the login URL then
-    // bounces straight into the app and the form steps are skipped.
-    const already = CFG.profileDir &&
-      (await page.waitForURL(CFG.successGlob, { timeout: 10000 }).then(() => true, () => false));
-    if (already) console.log("   Profile is still logged in.");
-    else await signIn(page);
+    await page.goto(CFG.loginUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await signIn(page);
 
     // Step 5: wait for the app, then let the final /api/authenticate POST +
     // redirect finish so the real session cookies are set before we save.
-    await page.waitForURL(CFG.successGlob, { timeout: 60000 });
+    await page.waitForURL(inApp, { timeout: 90000 });
     await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(2500);
 
@@ -203,7 +205,7 @@ async function openBrowser({ storageState } = {}) {
   return { ctx, close: () => browser.close() };
 }
 
-module.exports = { login, openBrowser, CFG };
+module.exports = { login, openBrowser, inApp, CFG };
 
 if (require.main === module) {
   login().catch(() => process.exit(1));
