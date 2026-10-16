@@ -6,7 +6,7 @@
 // along automatically. Reuses the saved session and only re-logs in on a 401.
 require("dotenv").config();
 const fs = require("fs");
-const { login, openBrowser, inApp, CFG } = require("./auth");
+const { login, openBrowser, CFG } = require("./auth");
 
 const SPID = process.env.SM_SPID;
 const GQL_URL = process.env.SM_GRAPHQL_URL || "https://platform.siteminder.com/api/cm-beef/graphql";
@@ -21,12 +21,9 @@ async function withGraphql(fn) {
   try {
     await page.goto(DASHBOARD(SPID), { waitUntil: "domcontentloaded", timeout: 45000 });
     await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
-    // A logged-in/trusted profile may still be on SiteMinder's device steps — let them finish.
-    await page.waitForURL(inApp, { timeout: 45000 }).catch(() => {});
     await page.waitForTimeout(1000);
 
     if (/\/login/.test(page.url())) throw new AuthError("redirected to login");
-    if (!inApp(new URL(page.url()))) throw new AuthError(`login didn't finish (${new URL(page.url()).pathname})`);
     const xsrf = (await ctx.cookies("https://platform.siteminder.com")).find((c) => c.name === "sm_xsrf_token");
     if (!xsrf) throw new AuthError("no sm_xsrf_token cookie (session likely invalid)");
 
