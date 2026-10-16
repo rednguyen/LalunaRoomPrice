@@ -36,6 +36,13 @@ const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 
+// True once the login has really reached the app. A logged-in or trusted device first walks
+// through SiteMinder's device steps (authx …/authenticated, platform /authenticate?userDeviceToken=…)
+// — still mid-login, so those don't count; nor does a …/forbidden page (access refused).
+const appHost = new URL(CFG.successGlob.replace(/\*+/g, "x")).hostname;
+const inApp = (u) => u.hostname === appHost && !/^\/(authenticate|login)\b/.test(u.pathname) && !/\/forbidden\b/.test(u.pathname);
+const EMAIL_FIELD = ['input[type="email"]', 'input[name="username"]', 'input[name="email"]', 'input#email'];
+
 function requireEnv() {
   for (const k of ["user", "pass", "totp"]) {
     if (!CFG[k]) throw new Error(`Missing env: SM_${k.toUpperCase()}. See .env.example.`);
@@ -69,7 +76,7 @@ async function clickAny(page, selectors, label, timeout = 25000) {
 async function signIn(page) {
   // Step 1: email
   await fillAny(page,
-    ['input[type="email"]', 'input[name="username"]', 'input[name="email"]', 'input#email'],
+    EMAIL_FIELD,
     CFG.user, "email");
   await clickAny(page,
     ['button:has-text("Next")', 'button[type="submit"]', 'button:has-text("Continue")'], "Next");
@@ -125,7 +132,7 @@ async function signIn(page) {
       }
       console.log(`   Click the link in SiteMinder's email (waiting up to ${waitMs / 60000} min)…`);
       // Done when the login reaches the app (an intermediate "check your email" page doesn't count).
-      await page.waitForURL(CFG.successGlob, { timeout: waitMs }).catch(() => {
+      await page.waitForURL(inApp, { timeout: waitMs }).catch(() => {
         throw new Error(`Device not confirmed within ${waitMs / 60000} min`);
       });
       console.log("   Device confirmed.");
@@ -156,16 +163,22 @@ async function login() {
   try {
     await page.goto(CFG.loginUrl,{ waitUntil: "domcontentloaded", timeout: 45000 });
 
-    // A persistent profile (SM_PROFILE_DIR) may still be logged in: the login URL then
-    // bounces straight into the app and the form steps are skipped.
-    const already = CFG.profileDir &&
-      (await page.waitForURL(CFG.successGlob, { timeout: 10000 }).then(() => true, () => false));
-    if (already) console.log("   Profile is still logged in.");
+    // A persistent profile (SM_PROFILE_DIR) may still be logged in: then the login URL walks
+    // through SiteMinder's device steps into the app (slow on the VPS) instead of showing the
+    // form. Wait for whichever comes first — the app (reuse the session) or the email field.
+    let reached = "form";
+    if (CFG.profileDir) {
+      reached = await Promise.race([
+        page.waitForURL(inApp, { timeout: 60000 }).then(() => "app"),
+        page.locator(EMAIL_FIELD.join(", ")).first().waitFor({ state: "visible", timeout: 60000 }).then(() => "form"),
+      ]).catch(() => { throw new Error(`Login stuck on ${new URL(page.url()).pathname} (neither the app nor the login form appeared)`); });
+    }
+    if (reached === "app") console.log("   Profile is still logged in.");
     else await signIn(page);
 
     // Step 5: wait for the app, then let the final /api/authenticate POST +
     // redirect finish so the real session cookies are set before we save.
-    await page.waitForURL(CFG.successGlob, { timeout: 60000 });
+    await page.waitForURL(inApp, { timeout: 90000 });
     await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(2500);
 
@@ -203,7 +216,7 @@ async function openBrowser({ storageState } = {}) {
   return { ctx, close: () => browser.close() };
 }
 
-module.exports = { login, openBrowser, CFG };
+module.exports = { login, openBrowser, inApp, CFG };
 
 if (require.main === module) {
   login().catch(() => process.exit(1));
