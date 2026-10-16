@@ -196,6 +196,12 @@ async function openBrowser({ storageState } = {}) {
   const opts = { userAgent: UA, viewport: { width: 1920, height: 1080 }, locale: "en-US" };
   if (CFG.profileDir) {
     const ctx = await chromium.launchPersistentContext(CFG.profileDir, { headless: !CFG.headful, slowMo: CFG.slowMo, ...opts });
+    // Auth0 leaves a "login in progress" cookie pair (com.auth0.auth.<state> + _compat, and
+    // co/verifier) for every login that starts but doesn't finish. In a long-lived profile they
+    // pile up until authx rejects the request (HTTP 431 "headers too large" → /error page, and the
+    // device stops being recognised). They're useless once that login is gone — drop them.
+    // AUTH_X_DEVICE_ID (trusted device) and AUTH_X_TOKEN (session) are untouched.
+    await ctx.clearCookies({ domain: "authx.siteminder.com", name: /^_?(com\.auth0\.auth\.|co%2Fverifier)/ });
     return { ctx, close: () => ctx.close() };
   }
   const browser = await chromium.launch({ headless: !CFG.headful, slowMo: CFG.slowMo });
