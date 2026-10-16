@@ -21,14 +21,13 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npx playwright install chromium
-      # Full Chromium, visible on a virtual screen — the same browser the report run and the RDP
-      # launcher use, so SiteMinder sees one consistent trusted device.
+      # Trusts the ALWAYS-OPEN browser (SM_CDP_URL, the sm-keepalive service): the bot attaches,
+      # signs in and clicks "Make trusted device" in that browser, then waits for you to click
+      # the link in SiteMinder's email. Because the report run attaches to this same browser, the
+      # trust it enrolls is the one the reports use.
       - name: Log in and wait for your click on the email link
-        run: |
-          command -v xvfb-run >/dev/null || { echo "xvfb missing — on the VPS run: apt-get install -y xvfb"; exit 1; }
-          xvfb-run -a -s "-screen 0 1920x1080x24" node src/auth.js
+        run: node src/auth.js
         env:
-          SM_HEADFUL: "true"
           SM_USER: ${{ secrets.SM_USER }}
           SM_PASS: ${{ secrets.SM_PASS }}
           SM_TOTP_SECRET: ${{ secrets.SM_TOTP_SECRET }}
@@ -37,3 +36,4 @@ jobs:
           SM_SUCCESS_URL_GLOB: https://platform.siteminder.com/**
           SM_PROFILE_DIR: /home/laluna/sm-profile
           SM_STATE_FILE: /home/laluna/sm-state.json
+          SM_CDP_URL: http://127.0.0.1:9222
