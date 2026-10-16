@@ -1,0 +1,34 @@
+name: Trust VPS in SiteMinder
+
+# One-time (or after SiteMinder drops the trust): logs the VPS's SiteMinder profile in and
+# waits on the "trusted device" screen. Run it, then click the link in SiteMinder's
+# "trusted device" email within 5 minutes. Needed so the report can reveal guest emails.
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: ota-sales-report      # never at the same time as a report run
+  cancel-in-progress: false
+
+jobs:
+  trust:
+    runs-on: [self-hosted, linux, laluna]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npx playwright install chromium
+      - name: Log in and wait for your click on the email link
+        run: node src/auth.js
+        env:
+          SM_USER: ${{ secrets.SM_USER }}
+          SM_PASS: ${{ secrets.SM_PASS }}
+          SM_TOTP_SECRET: ${{ secrets.SM_TOTP_SECRET }}
+          SM_SPID: ${{ secrets.SM_SPID }}
+          SM_DEVICE_TRUST: manual
+          SM_SUCCESS_URL_GLOB: https://platform.siteminder.com/**
+          SM_PROFILE_DIR: /home/laluna/sm-profile
+          SM_STATE_FILE: /home/laluna/sm-state.json

@@ -18,9 +18,8 @@ API is cookie-authenticated. The pipeline:
    `state/storageState.json`.
 2. **Trusted device** — two modes via `SM_DEVICE_TRUST`:
    - `skip` — log in as an untrusted, session-only device.
-   - `confirm` — auto-confirm the "trusted device" email. The email is read over
-     **IMAP** (`src/gmail.js`); SiteMinder sends it to the login address, which is
-     forwarded to the mailbox configured in `GMAIL_USER`.
+   - `manual` — pause on the "trusted device" screen until you click the link in
+     SiteMinder's email yourself; the login then continues and saves a trusted session.
 3. **Data fetch** (`src/graphql.js`, `src/fetchAvailability.js`) — loads the saved
    session, navigates to the dashboard (so the app sets `sm_access_token` +
    `sm_xsrf_token`), then POSTs to the GraphQL endpoint with the `sm_xsrf_token`
@@ -38,7 +37,6 @@ work reliably.
 
 ```
 src/auth.js              Automated login + session capture
-src/gmail.js             IMAP reader for the trusted-device confirmation email
 src/graphql.js           Authenticated GraphQL client (session reuse + re-login on 401)
 src/fetchAvailability.js Pull availability for N days -> data/availability.csv
 .env.example             Config template (copy to .env)
@@ -59,8 +57,6 @@ Fill `.env`:
 - `SM_USER`, `SM_PASS` — SiteMinder login
 - `SM_TOTP_SECRET` — base32 TOTP seed (Security → Reset MFA → "enter key manually")
 - `SM_SPID` — property id (from the dashboard URL)
-- For `SM_DEVICE_TRUST=confirm`: `GMAIL_USER` + `GMAIL_APP_PASSWORD`
-  (a Google app password for the mailbox that receives the device email)
 
 ## Usage
 
@@ -84,9 +80,8 @@ The fetch reuses the saved session and logs in only when it has expired.
 | `SM_DAYS` | `365` | days ahead to pull |
 | `SM_CHUNK_DAYS` | `30` | date-window size per request |
 | `SM_OUT_FILE` | `data/availability.csv` | output path |
-| `SM_DEVICE_TRUST` | `skip` | `skip` or `confirm` |
-| `GMAIL_USER` / `GMAIL_APP_PASSWORD` | — | IMAP mailbox for `confirm` mode |
-| `GMAIL_FROM_HINT` / `GMAIL_SUBJECT_HINT` | `siteminder,phutholaluna` / `trusted device` | email filter |
+| `SM_DEVICE_TRUST` | `skip` | `skip` or `manual` (you click the email link) |
+| `SM_TRUST_WAIT_MS` | `300000` | how long `manual` waits for your click |
 | `SM_HEADFUL` | `false` | show the browser window |
 | `SM_SLOWMO` | `0` | ms delay between actions (for watching) |
 | `SM_KEEP_OPEN_MS` | `0` | keep the window open at the end (for watching) |

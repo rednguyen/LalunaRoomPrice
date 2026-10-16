@@ -6,8 +6,7 @@
 // along automatically. Reuses the saved session and only re-logs in on a 401.
 require("dotenv").config();
 const fs = require("fs");
-const { chromium } = require("playwright");
-const { login, CFG } = require("./auth");
+const { login, openBrowser, CFG } = require("./auth");
 
 const SPID = process.env.SM_SPID;
 const GQL_URL = process.env.SM_GRAPHQL_URL || "https://platform.siteminder.com/api/cm-beef/graphql";
@@ -17,8 +16,7 @@ class AuthError extends Error {}
 
 // Open an authenticated context and hand `fn` a runner it can call many times.
 async function withGraphql(fn) {
-  const browser = await chromium.launch({ headless: !CFG.headful });
-  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, storageState: CFG.stateFile });
+  const { ctx, close } = await openBrowser({ storageState: CFG.stateFile });
   const page = await ctx.newPage();
   try {
     await page.goto(DASHBOARD(SPID), { waitUntil: "domcontentloaded", timeout: 45000 });
@@ -54,9 +52,9 @@ async function withGraphql(fn) {
       return json.data;
     };
 
-    return await fn(run);
+    return await fn(run, page);   // page: for steps that must run in the browser (trusted-device signing)
   } finally {
-    await browser.close();
+    await close();
   }
 }
 

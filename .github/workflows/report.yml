@@ -1,8 +1,15 @@
 name: OTA Sales Report
 
 on:
-  # Manual run from the Actions tab.
-  workflow_dispatch: {}
+  # Manual run from the Actions tab. "github" = backup if the VPS is down (report only;
+  # no guest emails there, since the trusted SiteMinder profile lives on the VPS).
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: "Where to run"
+        type: choice
+        options: [vps, github]
+        default: vps
   # Scheduled trigger comes from cron-job.org via the GitHub API:
   #   POST /repos/<owner>/<repo>/dispatches  { "event_type": "run-report" }
   repository_dispatch:
@@ -15,10 +22,13 @@ concurrency:
 
 jobs:
   report:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Normally the Ubuntu VPS (self-hosted runner labelled "laluna", see VPS_SETUP.md).
+    runs-on: ${{ inputs.runner == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted","linux","laluna"]') }}
+    timeout-minutes: 20
     permissions:
       contents: write        # needed to commit the dedupe log back
+    env:
+      ON_VPS: ${{ inputs.runner != 'github' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,14 +41,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The VPS got Chromium's system libraries once from deploy/vps-setup.sh (needs root);
+      # the browser itself is cached after the first run.
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install ${{ runner.environment == 'github-hosted' && '--with-deps' || '' }} chromium
 
       - name: Run report
         run: |
+          STATE="${SM_STATE_FILE:-state/storageState.json}"
           for attempt in 1 2 3; do
             echo "::group::Attempt $attempt"
-            rm -f state/storageState.json   # fresh login each attempt (clears a step-up'd session)
+            rm -f "$STATE"   # re-check the login each attempt (clears a step-up'd session)
             if node src/report.js; then echo "::endgroup::"; exit 0; fi
             echo "Attempt $attempt failed."
             echo "::endgroup::"
@@ -52,20 +65,30 @@ jobs:
           SM_SPID: ${{ secrets.SM_SPID }}
           SM_DAYS: "450"
           SM_DEVICE_TRUST: skip
+          SM_SUCCESS_URL_GLOB: https://platform.siteminder.com/**
           SM_HEADFUL: "false"
           ZALO_BOT_TOKEN: ${{ secrets.ZALO_BOT_TOKEN }}
           ZALO_CHAT_ID: ${{ secrets.ZALO_CHAT_ID }}
+          # VPS only: the trusted SiteMinder profile (reveals guest emails) + guest emails.
+          SM_PROFILE_DIR: ${{ env.ON_VPS == 'true' && '/home/laluna/sm-profile' || '' }}
+          SM_STATE_FILE: ${{ env.ON_VPS == 'true' && '/home/laluna/sm-state.json' || '' }}
+          GUEST_EMAIL_MODE: ${{ vars.GUEST_EMAIL_MODE || 'dry-run' }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_FROM: ${{ secrets.GMAIL_FROM }}
 
-      # Persist the dedupe log by committing it back to the repo.
+      # Persist the dedupe + emailed-guests logs by committing them back to the repo.
       - name: Commit updated dedupe log
         if: always()
         run: |
-          if git diff --quiet -- state/seenReservations.json; then
+          for f in state/seenReservations.json state/emailedGuests.json; do
+            if [ -f "$f" ]; then git add "$f"; fi
+          done
+          if git diff --cached --quiet; then
             echo "No dedupe changes to commit."
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add state/seenReservations.json
             git commit -m "chore: update dedupe log [skip ci]"
-            git push
+            git pull --rebase && git push
           fi

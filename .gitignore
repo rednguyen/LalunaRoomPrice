@@ -2,6 +2,7 @@ node_modules/
 .env
 state/*
 !state/seenReservations.json
+!state/emailedGuests.json
 data/
 *.png
 *.har

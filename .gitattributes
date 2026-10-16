@@ -1,0 +1,2 @@
+# Shell scripts run on the Linux VPS — keep LF line endings even when edited on Windows.
+*.sh text eol=lf

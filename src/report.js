@@ -4,6 +4,8 @@
 // Step 2: reservations booked yesterday->now (Asia/Ho_Chi_Minh), deduped by
 //         sourceId (rolling last 100). Modifications are skipped for now.
 // Step 3: cancellations (by cancellation date), deduped as "<sourceId>|C".
+//         New Booking.com cancellations: reveal the guest's relay email and send the
+//         feedback email (cancellationEmail.txt) — see GUEST_EMAIL_MODE below.
 // Then aggregate rooms sold per SiteMinder room type per stay-night, format the
 // bookings report (+ a separate cancellations report) and hand them to Zalo.
 require("dotenv").config();
@@ -11,6 +13,20 @@ const fs = require("fs");
 const path = require("path");
 const { withGraphqlAuth, SPID } = require("./graphql");
 const { sendToZalo } = require("./zalo");
+const { revealGuestEmail } = require("./siteminderGuest");
+const gmail = require("./gmailSend");
+
+// Cancellation feedback emails (Booking.com only for now). Needs the trusted SiteMinder
+// browser profile (SM_PROFILE_DIR) to reveal emails; without it the feature is inactive
+// and the report is unchanged.
+//   off = never   ·   dry-run (default) = reveal + build the email, don't send   ·   live = send
+const GUEST_EMAIL_MODE = (process.env.GUEST_EMAIL_MODE || "dry-run").toLowerCase();
+const GUEST_EMAIL_ACTIVE = !!process.env.SM_PROFILE_DIR && GUEST_EMAIL_MODE !== "off";
+const EMAILED_FILE = process.env.GUEST_EMAIL_LOG || "state/emailedGuests.json";
+const isBookingCom = (r) => /booking\.?com/i.test(r.channel && r.channel.name);
+// Extra line under a cancellation whose guest was emailed (the email lands in the
+// reservation's extranet conversation). Not-emailed ones get nothing.
+const EMAILED_NOTE = "\n   ✉️ Đã hỏi thăm khách trên Extranet";
 
 const CM_URL = "https://platform.siteminder.com/api/cm-beef/graphql";
 const RES_URL = "https://platform.siteminder.com/api/reservations-beef/graphql";
@@ -38,7 +54,7 @@ const RES_QUERY = `query getReservationsSearch($spid: ID!, $filters: PlatformRes
   hotel(spid: $spid) {
     platformReservations(filters: $filters, pagination: $pagination) {
       results {
-        uuid sourceId
+        uuid sourceId smPlatformReservationId
         channel { code name __typename }
         fromDate toDate checkOutDate canceledAt modifiedAt channelCreatedAt
         currency
@@ -137,6 +153,18 @@ function saveSeen(ids) {
   fs.writeFileSync(SEEN_FILE, JSON.stringify({ sourceIds: ids.slice(-SEEN_CAP) }, null, 2) + "\n");
 }
 
+// ---- guests already emailed (never email anyone twice, even across workflow retries) ----
+function loadEmailed() {
+  try { return JSON.parse(fs.readFileSync(EMAILED_FILE, "utf8")).sent || []; } catch { return []; }
+}
+function logEmailed(sourceId) {
+  const sent = loadEmailed();
+  sent.push({ sourceId, at: new Date().toISOString() });
+  fs.mkdirSync(path.dirname(EMAILED_FILE), { recursive: true });
+  fs.writeFileSync(EMAILED_FILE, JSON.stringify({ sent: sent.slice(-500) }, null, 2) + "\n");
+}
+const maskEmail = (e) => `${e.slice(0, 2)}***@${e.split("@")[1]}`;
+
 async function fetchAvailability(run, startISO, count = AVAIL_DAYS) {
   const dates = [];
   for (let i = 0; i < count; i++) dates.push(addDaysISO(startISO, i));
@@ -194,11 +222,23 @@ function guestName(g) {
   const seen = loadSeen();
   const seenSet = new Set(seen);
 
-  const { avail, reservations, cancelled } = await withGraphqlAuth(async (run) => {
+  const emailedSet = new Set(loadEmailed().map((e) => e.sourceId));
+
+  const { avail, reservations, cancelled, guests } = await withGraphqlAuth(async (run, page) => {
     const avail = await fetchAvailability(run, todayISO);
     const reservations = await fetchReservations(run, bookedStart, bookedEnd);
     const cancelled = await fetchCancellations(run, bookedStart, bookedEnd);
-    return { avail, reservations, cancelled };
+    // Reveal emails while the trusted browser is open (one trusted-device check each).
+    // guests: sourceId -> { email, firstName, lastName } | { error }
+    const guests = new Map();
+    if (GUEST_EMAIL_ACTIVE) {
+      for (const r of cancelled) {
+        if (!isBookingCom(r) || seenSet.has(`${r.sourceId}|C`) || emailedSet.has(r.sourceId)) continue;
+        try { guests.set(r.sourceId, await revealGuestEmail(run, page, SPID, r.smPlatformReservationId)); }
+        catch (e) { guests.set(r.sourceId, { error: e.message }); }
+      }
+    }
+    return { avail, reservations, cancelled, guests };
   });
 
   console.log(`Fetched: availability ${avail.size} cells, reservations ${reservations.length}, cancellations ${cancelled.length} in window ${yesterdayISO}..${todayISO} (VN)`);
@@ -259,10 +299,12 @@ function guestName(g) {
     const rooms = [...new Set((r.roomStays || []).map((rs) => resolveRoomType(chKey, rs.roomName) || rs.roomName))];
     const total = r.totalAmount && r.totalAmount.amountAfterTax;
     const when = r.fromDate && checkOut ? stayRange(r.fromDate, checkOut) : "?";
-    cancellations.push(
-      `👤 ${r.channel && r.channel.name} - ${r.sourceId} | ${guestName(r.mainGuest)}\n` +
-      `   🛏️ ${rooms.join(", ") || "(?)"} · ${when}${total != null ? ` · 💰 ${fmtMoney(total, r.currency)}` : ""}`
-    );
+    cancellations.push({
+      sourceId: r.sourceId,
+      emailed: GUEST_EMAIL_ACTIVE && isBookingCom(r),   // guest gets the feedback email
+      text: `👤 ${r.channel && r.channel.name} - ${r.sourceId} | ${guestName(r.mainGuest)}\n` +
+        `   🛏️ ${rooms.join(", ") || "(?)"} · ${when}${total != null ? ` · 💰 ${fmtMoney(total, r.currency)}` : ""}`,
+    });
   }
 
   // ---- build report text ----
@@ -287,11 +329,6 @@ function guestName(g) {
     ? `${title}\n\n✅ Không có booking mới nào đến thời điểm hiện tại.`
     : `${title}\n\n` + sections.join(`\n${SEP}\n`);
 
-  // Cancellations are a SEPARATE message, sent only when there are any.
-  const cancelReport = cancellations.length
-    ? `❌ Hủy phòng ngày ${ddmmyyyy(todayISO)}:\n\n` + cancellations.join(`\n${SEP}\n`)
-    : null;
-
   if (unmapped.length) {
     console.log(`\n⚠️ ${unmapped.length} unmapped room stay(s):`);
     for (const u of unmapped) console.log(`   [${u.channel}] ${u.roomName}  (src ${u.sourceId})`);
@@ -307,6 +344,43 @@ function guestName(g) {
   console.log("\n===== BOOKINGS =====\n" + bookingReport + "\n");
   if (!delivered(await sendToZalo(bookingReport))) throw new Error("Zalo send failed (bookings) — not marked as reported; will retry.");
   if (newSourceIds.length) { seen.push(...newSourceIds); saveSeen(seen); }
+
+  // Email the Booking.com guests BEFORE the cancellations report, so each line can say
+  // whether it went out. A failure never blocks the report — it becomes a ⚠️ line.
+  const emailStatus = new Map();   // sourceId -> "sent" | "dry-run" | "failed"
+  for (const c of cancellations.filter((x) => x.emailed)) {
+    if (emailedSet.has(c.sourceId)) { emailStatus.set(c.sourceId, "sent"); continue; }   // earlier attempt of this run
+    const g = guests.get(c.sourceId);
+    if (!g || g.error) {
+      console.log(`✉️ ${c.sourceId}: couldn't get the guest email — ${g ? g.error : "not revealed"}`);
+      emailStatus.set(c.sourceId, "failed"); continue;
+    }
+    const name = `${g.firstName} ${g.lastName}`.trim() || "Guest";
+    if (GUEST_EMAIL_MODE !== "live") {
+      console.log(`✉️ [dry-run] ${c.sourceId}: would email ${maskEmail(g.email)} (Dear ${name})`);
+      emailStatus.set(c.sourceId, "dry-run"); continue;
+    }
+    try {
+      // GUEST_EMAIL_TEST_TO: end-to-end test — the email goes to that address instead of the
+      // guest, and isn't logged as sent (so the real guest can still be emailed later).
+      const testTo = process.env.GUEST_EMAIL_TEST_TO;
+      await gmail.sendEmail({ to: testTo || g.email, ...gmail.renderTemplate({ guestName: name }) });
+      if (!testTo) logEmailed(c.sourceId);
+      console.log(`✉️ ${c.sourceId}: emailed ${testTo ? `TEST ADDRESS instead of ${maskEmail(g.email)}` : maskEmail(g.email)}`);
+      emailStatus.set(c.sourceId, "sent");
+    } catch (e) {
+      console.log(`✉️ ${c.sourceId}: ${e.message}`);
+      emailStatus.set(c.sourceId, "failed");
+    }
+  }
+
+  // Cancellations are a SEPARATE message, sent only when there are any.
+  const cancelReport = cancellations.length
+    ? `❌ Hủy phòng ngày ${ddmmyyyy(todayISO)}:\n\n` + cancellations.map((c) =>
+        // Only a guest that was actually emailed gets a note; anything else stays silent.
+        emailStatus.get(c.sourceId) === "sent" ? `${c.text}${EMAILED_NOTE}` : c.text
+      ).join(`\n${SEP}\n`)
+    : null;
 
   if (cancelReport) {
     console.log("\n===== CANCELLATIONS =====\n" + cancelReport + "\n");

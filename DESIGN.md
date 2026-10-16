@@ -6,7 +6,7 @@ a daily Vietnamese "Báo Cáo OTA Sales" report and deliver it to a Zalo group.
 
 - **Property (spid):** `f480c881-63c3-4a11-8d81-bba590c4bbca`
 - **Stack:** Node.js + Playwright (headless Chromium) + axios
-- **Runs on:** GitHub Actions (triggered daily by cron-job.org), repo `rednguyen/LalunaRoomPrice`
+- **Runs on:** GitHub Actions on a self-hosted Ubuntu VPS runner (`laluna`), triggered daily by cron-job.org (setup: [VPS_SETUP.md](VPS_SETUP.md)), repo `rednguyen/LalunaRoomPrice`
 
 ---
 
@@ -36,7 +36,7 @@ cookies on `.siteminder.com`), not bearer tokens.
 3. auth0.siteminder.com/authorize       login_ticket → authorization code (no PKCE)
 4. authx.siteminder.com/api/authenticate code → session + token (server-side exchange)
 5. MFA (/mfa)                           6-digit TOTP (authenticator app)
-6. trusted-device screen                "Skip" (session-only) OR confirm via email
+6. trusted-device screen                "Skip" (session-only) OR a human confirms via the email link
 7. lands on platform.siteminder.com/dashboard/<spid>
 ```
 
@@ -53,13 +53,13 @@ which is why we drive a real browser instead of replaying HTTP by hand.
   then type it digit-by-digit into the focused first box so the component auto-advances.
 - **Trusted device** (`SM_DEVICE_TRUST`):
   - `skip` (default/production): click **"Skip"** → log in as an untrusted,
-    session-only device. Verified: the untrusted session can still read availability
-    **and** reservations, so this is all we need.
-  - `confirm`: auto-confirm the "trusted device" email. SiteMinder mails the login
-    address; the user forwards it to another Gmail that the bot reads over **IMAP**
-    (`src/gmail.js`, app password). Confirmation must be done by **opening the email
-    link in the browser** (`page.goto`), not a bare GET — a bare GET confirms
-    server-side but doesn't advance the open login session.
+    session-only device. The untrusted session could read availability **and**
+    reservations, but on 2026-10-15 it got a persistent `step_up_required` on the
+    reservations search even from a residential IP.
+  - `manual`: pause on the trusted-device screen until a **human clicks the link** in
+    SiteMinder's "trusted device" email; the headless login page then moves on into the
+    app by itself, and the trusted session is saved. (An earlier `confirm` mode read that
+    email over Gmail IMAP automatically; it was removed when the email forwarding stopped.)
 - **Session capture:** on success, Playwright's `storageState` (cookies + localStorage)
   is saved to `state/storageState.json`.
 
@@ -293,11 +293,16 @@ runner** on a residential/stable IP, where `skip` mode always works.
 
 ```
 src/auth.js              Automated login + session capture (TOTP, trusted-device modes)
-src/gmail.js             IMAP reader for the trusted-device email (confirm mode only)
 src/graphql.js           Authenticated GraphQL client (session reuse + re-login on 401)
 src/report.js            The daily OTA sales report (availability + reservations)
 src/fetchAvailability.js Standalone availability → data/availability.csv exporter
 src/zalo.js              Zalo Bot API sender + 2000-char section-aware splitting
+src/siteminderGuest.js   Reveal a guest's real email (trusted-device challenge, §13)
+src/gmailSend.js         Gmail SMTP sender (App Password) + --test
+cancellationEmail.txt    Cancellation feedback email (Subject line + body, {guestName})
+deploy/vps-setup.sh      One-time Ubuntu VPS setup (runner user, Node, Chromium libs)
+VPS_SETUP.md             VPS + runner + trust setup steps
+.github/workflows/trust-device.yml  One-time "trust the VPS in SiteMinder" workflow
 roomTypes.json           SiteMinder room uuid → name
 roomMappings.json        SiteMinder name → per-channel OTA room name (6 OTAs + Direct)
 .github/workflows/report.yml  Daily Actions workflow
@@ -315,12 +320,16 @@ roomMappings.json        SiteMinder name → per-channel OTA room name (6 OTAs +
 | `SM_SPID` | — | property id |
 | `SM_DAYS` | 365 (450 in prod) | availability horizon (days) |
 | `SM_CHUNK_DAYS` | 30 | availability request window size |
-| `SM_DEVICE_TRUST` | skip | `skip` or `confirm` (Gmail) |
+| `SM_DEVICE_TRUST` | skip | `skip` or `manual` (a human clicks the email link) |
 | `SM_TOPUP_ROOMS` | (empty = disabled) | rooms that get the top-up note at `còn=0` |
 | `SM_HEADFUL` / `SM_SLOWMO` / `SM_KEEP_OPEN_MS` | false / 0 / 0 | debugging (watch the browser) |
-| `GMAIL_USER` / `GMAIL_APP_PASSWORD` | — | IMAP mailbox for `confirm` mode |
 | `ZALO_BOT_TOKEN` / `ZALO_CHAT_ID` | — | Zalo delivery |
 | `ZALO_MAX_LEN` | 2000 | max chars per Zalo message |
+| `SM_PROFILE_DIR` | — | persistent SiteMinder browser profile (holds the trusted-device key) |
+| `SM_TRUST_WAIT_MS` | 300000 | how long `manual` trust waits for the email click |
+| `GUEST_EMAIL_MODE` | dry-run | `off` / `dry-run` / `live` cancellation emails |
+| `GUEST_EMAIL_TEST_TO` | — | test: send guest emails to this address instead (not logged) |
+| `GMAIL_USER` / `GMAIL_APP_PASSWORD` / `GMAIL_FROM` | — | Gmail SMTP sender |
 
 ---
 
@@ -341,7 +350,42 @@ roomMappings.json        SiteMinder name → per-channel OTA room name (6 OTAs +
 
 ---
 
+## 13. Cancellation feedback emails (Booking.com)
+
+For each **new Booking.com cancellation**, the report emails the guest a feedback note
+(`cancellationEmail.txt`) **before** sending the cancellations report to Zalo.
+
+1. **Reveal the email** (`src/siteminderGuest.js`). `getCmReservationDetail` on
+   `/api/reservations-beef/graphql` takes the reservation's **`smPlatformReservationId`** (now
+   requested in the search; *not* `uuid`) and returns emails **masked** unless, right before
+   each call, the session passes SiteMinder's trusted-device check on
+   `/api/property-beef/graphql`: `generateTrustedDeviceChallenge(deviceId)` → sign the nonce →
+   `verifyTrustedDeviceChallenge(...)` → `true`. One check unlocks one detail call.
+   Signing mirrors the app's `signChallenge`: ECDSA P-256/SHA-256 over the
+   base64url-decoded nonce, base64url output. The key is a **non-extractable** CryptoKey the app
+   stored in IndexedDB (`platform-property-trusted-devices` / `device-keys`) when the device was
+   trusted, so this needs the persistent profile (`SM_PROFILE_DIR`), trusted once with
+   `SM_DEVICE_TRUST=manual` (VPS: the "Trust VPS in SiteMinder" workflow). Booking.com gives a
+   relay address (`…@guest.booking.com`); Agoda gives `…@agoda-messaging.com`.
+2. **Send** (`src/gmailSend.js`) via Gmail SMTP with an App Password from
+   `hoianlaluna@gmail.com`, the address Booking.com accepts (verified by hand: an email to a
+   cancelled reservation's relay address lands in its extranet conversation).
+3. **Zalo:** only when Gmail **accepted** the email does the cancellation get an extra line
+   `   ✉️ Đã hỏi thăm khách trên Extranet`. Not sent (failed, dry-run, other channels) → no
+   note. Bounces aren't checked.
+4. **Never twice:** emailed guests are logged in `state/emailedGuests.json` (repo-tracked),
+   so a workflow retry can't re-email. `GUEST_EMAIL_MODE` defaults to `dry-run`; without
+   `SM_PROFILE_DIR` (e.g. the GitHub-hosted backup runner) the feature is off.
+
+Untrusted ("Skip") sessions started getting a persistent `step_up_required` on the
+reservations search on 2026-10-15; the trusted VPS profile avoids it.
+
+---
+
 ## 12. Changelog (report format)
+
+- **2026-10-16 — cancellation emails.** Emailed Booking.com cancellations get a
+  `✉️ Đã hỏi thăm khách trên Extranet` line (§13).
 
 - **2026-10-13 — `tổng` is the full booking total.** It used to be the per-room total
   (`total ÷ rooms`), which under-stated multi-room bookings (e.g. a 2-room Agoda booking of

@@ -13,7 +13,6 @@ const fs = require("fs");
 const path = require("path");
 const { chromium } = require("playwright");
 const { authenticator } = require("otplib");
-const { fetchTrustLink } = require("./gmail");
 
 const CFG = {
   user: process.env.SM_USER,
@@ -22,9 +21,11 @@ const CFG = {
   loginUrl: process.env.SM_LOGIN_URL || "https://authx.siteminder.com/login",
   successGlob: process.env.SM_SUCCESS_URL_GLOB || "https://property.siteminder.com/**",
   stateFile: process.env.SM_STATE_FILE || "state/storageState.json",
+  // Optional persistent browser profile (see openBrowser). Keep it outside the repo.
+  profileDir: process.env.SM_PROFILE_DIR,
   headful: String(process.env.SM_HEADFUL).toLowerCase() === "true",
   // "skip" = log in as an untrusted session-only device (default);
-  // "confirm" = auto-confirm the trusted-device email via Gmail (IMAP).
+  // "manual" = wait on the trusted-device screen for a human to click the email link.
   deviceTrust: (process.env.SM_DEVICE_TRUST || "skip").toLowerCase(),
   // Watchability: slow each action down, and keep the window open at the end.
   slowMo: Number(process.env.SM_SLOWMO || 0),
@@ -64,86 +65,91 @@ async function clickAny(page, selectors, label, timeout = 25000) {
   return true;
 }
 
+// Steps 1–4 of the login form: email, password, TOTP, trusted-device screen.
+async function signIn(page) {
+  // Step 1: email
+  await fillAny(page,
+    ['input[type="email"]', 'input[name="username"]', 'input[name="email"]', 'input#email'],
+    CFG.user, "email");
+  await clickAny(page,
+    ['button:has-text("Next")', 'button[type="submit"]', 'button:has-text("Continue")'], "Next");
+
+  // Step 2: password
+  await fillAny(page,
+    ['input[type="password"]', 'input[name="password"]'], CFG.pass, "password");
+  await clickAny(page,
+    ['button:has-text("Log in")', 'button:has-text("Login")', 'button:has-text("Sign in")',
+     'button:has-text("Next")', 'button[type="submit"]'], "login submit");
+
+  // Step 3: MFA (TOTP) — 6 separate number boxes that auto-submit when filled.
+  const code = authenticator.generate(CFG.totp.replace(/\s/g, ""));
+  const boxes = page.locator(
+    'input.sm-input__field[type="number"], input[autocomplete="one-time-code"], ' +
+    'input[name="code"], input[name="otp"]'
+  );
+  try {
+    await boxes.first().waitFor({ state: "visible", timeout: 15000 });
+    const n = await boxes.count();
+    if (n >= 6) {
+      // Segmented input: focus the first box and type digit-by-digit so the
+      // component auto-advances focus and auto-submits on the 6th digit.
+      await boxes.first().click();
+      await page.keyboard.type(code, { delay: 90 });
+    } else {
+      await boxes.first().fill(code);
+      await page.keyboard.press("Enter").catch(() => {});
+    }
+    // Fallback submit if this variant shows a button instead of auto-submitting.
+    await clickAny(page,
+      ['button:has-text("Verify")', 'button:has-text("Continue")', 'button:has-text("Submit")'],
+      "MFA verify", 3000).catch(() => {});
+  } catch (_) {
+    // No MFA prompt this run (still a trusted session) — continue.
+  }
+
+  // Step 4: "Confirm trusted device" screen (may not appear if already past it).
+  if (CFG.deviceTrust === "manual") {
+    // A human trusts this device: they click the link in SiteMinder's "trusted device"
+    // email, and this login page then moves on into the app by itself.
+    const onTrustScreen = await page
+      .waitForURL("**/trusted-device-setup", { timeout: 15000 })
+      .then(() => true).catch(() => false);
+    if (onTrustScreen) {
+      const waitMs = Number(process.env.SM_TRUST_WAIT_MS || 300000);
+      console.log(`   Trusted-device screen — click the link in SiteMinder's email (waiting up to ${waitMs / 60000} min)…`);
+      await page.waitForURL((u) => !/trusted-device-setup/.test(u.href), { timeout: waitMs }).catch(() => {
+        throw new Error(`Device not confirmed within ${waitMs / 60000} min`);
+      });
+      console.log("   Device confirmed.");
+    }
+  } else {
+    // Default "skip": complete login as a session-only (untrusted) device.
+    try {
+      const skip = page.locator('a:has-text("Skip"), button:has-text("Skip")').first();
+      await skip.waitFor({ state: "visible", timeout: 12000 });
+      await skip.click();
+    } catch (_) {
+      // No trusted-device prompt this run — continue.
+    }
+  }
+}
+
 async function login() {
   requireEnv();
   fs.mkdirSync(path.dirname(CFG.stateFile), { recursive: true });
 
-  const browser = await chromium.launch({ headless: !CFG.headful, slowMo: CFG.slowMo });
-  const ctx = await browser.newContext({ userAgent: UA, viewport: { width: 1920, height: 1080 }, locale: "en-US" });
+  const { ctx, close } = await openBrowser();
   const page = await ctx.newPage();
 
   try {
-    await page.goto(CFG.loginUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.goto(CFG.loginUrl,{ waitUntil: "domcontentloaded", timeout: 45000 });
 
-    // Step 1: email
-    await fillAny(page,
-      ['input[type="email"]', 'input[name="username"]', 'input[name="email"]', 'input#email'],
-      CFG.user, "email");
-    await clickAny(page,
-      ['button:has-text("Next")', 'button[type="submit"]', 'button:has-text("Continue")'], "Next");
-
-    // Step 2: password
-    await fillAny(page,
-      ['input[type="password"]', 'input[name="password"]'], CFG.pass, "password");
-    await clickAny(page,
-      ['button:has-text("Log in")', 'button:has-text("Login")', 'button:has-text("Sign in")',
-       'button:has-text("Next")', 'button[type="submit"]'], "login submit");
-
-    // Step 3: MFA (TOTP) — 6 separate number boxes that auto-submit when filled.
-    const code = authenticator.generate(CFG.totp.replace(/\s/g, ""));
-    const boxes = page.locator(
-      'input.sm-input__field[type="number"], input[autocomplete="one-time-code"], ' +
-      'input[name="code"], input[name="otp"]'
-    );
-    try {
-      await boxes.first().waitFor({ state: "visible", timeout: 15000 });
-      const n = await boxes.count();
-      if (n >= 6) {
-        // Segmented input: focus the first box and type digit-by-digit so the
-        // component auto-advances focus and auto-submits on the 6th digit.
-        await boxes.first().click();
-        await page.keyboard.type(code, { delay: 90 });
-      } else {
-        await boxes.first().fill(code);
-        await page.keyboard.press("Enter").catch(() => {});
-      }
-      // Fallback submit if this variant shows a button instead of auto-submitting.
-      await clickAny(page,
-        ['button:has-text("Verify")', 'button:has-text("Continue")', 'button:has-text("Submit")'],
-        "MFA verify", 3000).catch(() => {});
-    } catch (_) {
-      // No MFA prompt this run (still a trusted session) — continue.
-    }
-
-    // Step 4: "Confirm trusted device" screen (may not appear if already past it).
-    if (CFG.deviceTrust === "confirm") {
-      const onTrustScreen = await page
-        .waitForURL("**/trusted-device-setup", { timeout: 15000 })
-        .then(() => true).catch(() => false);
-      if (onTrustScreen) {
-        const since = new Date(Date.now() - 2 * 60 * 1000);
-        console.log("   Trusted-device screen — fetching confirmation email…");
-        const link = await fetchTrustLink({ since });
-        console.log("   Opening confirmation link in the browser to complete enrollment…");
-        // Navigate the login tab to the confirm link: it confirms the device AND
-        // lets SiteMinder redirect this session into the app ("follow the links
-        // in the email"). A bare GET confirms server-side but doesn't advance the UI.
-        await page.goto(link, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
-        await page.waitForURL(CFG.successGlob, { timeout: 30000 }).catch(async () => {
-          // If the confirm page is static, nudge to the app home now that we're trusted.
-          await page.goto("https://platform.siteminder.com/", { waitUntil: "domcontentloaded" }).catch(() => {});
-        });
-      }
-    } else {
-      // Default "skip": complete login as a session-only (untrusted) device.
-      try {
-        const skip = page.locator('a:has-text("Skip"), button:has-text("Skip")').first();
-        await skip.waitFor({ state: "visible", timeout: 12000 });
-        await skip.click();
-      } catch (_) {
-        // No trusted-device prompt this run — continue.
-      }
-    }
+    // A persistent profile (SM_PROFILE_DIR) may still be logged in: the login URL then
+    // bounces straight into the app and the form steps are skipped.
+    const already = CFG.profileDir &&
+      (await page.waitForURL(CFG.successGlob, { timeout: 10000 }).then(() => true, () => false));
+    if (already) console.log("   Profile is still logged in.");
+    else await signIn(page);
 
     // Step 5: wait for the app, then let the final /api/authenticate POST +
     // redirect finish so the real session cookies are set before we save.
@@ -167,11 +173,25 @@ async function login() {
     console.error(`   Screenshot : ${shot}`);
     throw err;
   } finally {
-    await browser.close();
+    await close();
   }
 }
 
-module.exports = { login, CFG };
+// SM_PROFILE_DIR set: one browser profile kept on disk, so cookies AND the browser's
+// IndexedDB survive between runs — the trusted-device signing key lives there (needed to
+// reveal guest emails). Unset: a throwaway browser per run, session carried in SM_STATE_FILE.
+async function openBrowser({ storageState } = {}) {
+  const opts = { userAgent: UA, viewport: { width: 1920, height: 1080 }, locale: "en-US" };
+  if (CFG.profileDir) {
+    const ctx = await chromium.launchPersistentContext(CFG.profileDir, { headless: !CFG.headful, slowMo: CFG.slowMo, ...opts });
+    return { ctx, close: () => ctx.close() };
+  }
+  const browser = await chromium.launch({ headless: !CFG.headful, slowMo: CFG.slowMo });
+  const ctx = await browser.newContext({ ...opts, ...(storageState ? { storageState } : {}) });
+  return { ctx, close: () => browser.close() };
+}
+
+module.exports = { login, openBrowser, CFG };
 
 if (require.main === module) {
   login().catch(() => process.exit(1));
