@@ -55,11 +55,26 @@ The SiteMinder and Zalo secrets already exist and are reused.
 arrives, click its link within 5 minutes. The run turns green ✅.
 
 ## 6. First run
-**Actions → OTA Sales Report → Run workflow (runner: vps).** Check Zalo. With `dry-run`,
-Booking.com cancellations show no ✉️ note yet. Switch `GUEST_EMAIL_MODE` to `live` when ready.
+**Actions → OTA Sales Report → Run workflow (runner: vps, Post to Zalo: no).** The "Run report"
+log should show `✉️ [dry-run] …: would email …` — the guest-email reveal working on the VPS.
+
+## 7. Go live
+1. **Variable `GUEST_EMAIL_MODE` → `live`** (Settings → … → Variables).
+2. **Re-enable cron-job.org.**
+3. One manual run (runner: vps, Post to Zalo: **yes**) to confirm: a new Booking.com
+   cancellation shows `✉️ Đã hỏi thăm khách trên Extranet` in Zalo and the guest gets the email.
+
+## ⚠️ The one rule
+**Never open the "SiteMinder (bot profile)" browser on the VPS desktop** (deploy/vps-desktop.sh
+installs that icon). It's a *different* Chromium build than the one the workflows use, and
+opening it on the profile makes SiteMinder **revoke the trusted device** — then the reveal
+breaks until you re-run step 5. The report/trust workflows run the full Chromium under **xvfb**
+(installed by vps-setup.sh) so SiteMinder always sees the one trusted device; don't bypass that.
+If you only ever use SSH + the GitHub workflows, you'll never hit this.
 
 ## Day to day
 - **VPS down?** Actions → OTA Sales Report → Run workflow → **runner: github**. The reports go
   out; guest emails wait until the VPS is back.
-- **Emails stopped / no ✉️ notes?** SiteMinder may have dropped the trust: re-run step 5.
+- **Emails stopped / no ✉️ notes?** SiteMinder dropped the trust: re-run step 5 (and check
+  nobody opened the bot-profile browser).
 - **Never twice:** emailed guests are logged in `state/emailedGuests.json`.

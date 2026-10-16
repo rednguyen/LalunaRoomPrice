@@ -380,6 +380,17 @@ For each **new Booking.com cancellation**, the report emails the guest a feedbac
 Untrusted ("Skip") sessions started getting a persistent `step_up_required` on the
 reservations search on 2026-10-15; the trusted VPS profile avoids it.
 
+**Keeping the trust alive (hard-won).** SiteMinder ties the trusted device to the *exact*
+browser build. So on the VPS the trust and report workflows both run the **full Playwright
+Chromium under xvfb** (`SM_HEADFUL=true` + `xvfb-run`): the headless shell, or a *different*
+Chromium (the `deploy/vps-desktop.sh` "SiteMinder (bot profile)" launcher is Chrome-for-Testing)
+opening the same profile makes SiteMinder **revoke** the device, and the reveal then fails with
+"isn't a trusted device". Rule: only the workflows touch `/home/laluna/sm-profile`; never open
+the RDP bot-profile browser once trusted. The report run itself doesn't wipe anything —
+`openBrowser()` only drops Auth0 "login-in-progress" junk cookies (which otherwise pile up until
+authx returns HTTP 431), keeping `AUTH_X_DEVICE_ID` and the IndexedDB key. Re-trusting is one
+click: the "Trust VPS in SiteMinder" workflow (`SM_DEVICE_TRUST=manual`) + the email link.
+
 ---
 
 ## 12. Changelog (report format)
