@@ -154,7 +154,10 @@ Produces the "Báo Cáo OTA Sales" report. All dates/times are **Asia/Ho_Chi_Min
 2. **Bookings** — pull reservations made **yesterday 00:00 → today 23:59:59 (VN)**. Dedupe
    against `state/seenReservations.json` (**rolling last 100** keys) so each reports once;
    unmapped bookings are **not** consumed (they retry once their mapping exists).
-   `Modification` records are skipped; `Cancellation` records are handled in step 4.
+   A booking reports **once**; a later modification of an already-reported booking is skipped by
+   the dedupe check (a new booking modified the **same day**, before its first report, still
+   reports — we no longer skip on `modifiedAt`, which used to drop it). `Cancellation` records
+   are handled in step 4.
 3. **Aggregate** — for each booking's `roomStays`, map to a SiteMinder room; the stay occupies
    nights `fromDate → checkOutDate` (exclusive), counting **only nights from today onward**.
    `bán` per night = rooms sold; `còn` = the availability snapshot.
@@ -337,8 +340,9 @@ roomMappings.json        SiteMinder name → per-channel OTA room name (6 OTAs +
 
 - **Rates/prices** — only availability + reservations are pulled; rates are a separate
   GraphQL operation to add.
-- **Modifications** — `Modification` records are still skipped (only new bookings and
-  cancellations are reported).
+- **Modifications** — a *change* to an already-reported booking isn't reported as its own event
+  (the dedupe check skips it). New bookings and cancellations are reported. (Fixed 2026-10-17: a
+  new booking modified the same day used to be dropped entirely; it now reports once.)
 - **Old/renamed room names** — a booking made long ago (surfaced via a cancellation) may
   carry an outdated OTA room name that no longer prefix-matches `roomMappings.json`; it then
   shows the raw channel name instead of the SiteMinder name. (Could be fixed with multiple

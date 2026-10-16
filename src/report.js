@@ -2,7 +2,8 @@
 //
 // Step 1: availability (roomTypeDates) for the next N days  -> "còn" source.
 // Step 2: reservations booked yesterday->now (Asia/Ho_Chi_Minh), deduped by
-//         sourceId (rolling last 100). Modifications are skipped for now.
+//         sourceId (rolling last 100). A booking reports once; later modifications of an
+//         already-reported booking are skipped by the dedupe (seen) check.
 // Step 3: cancellations (by cancellation date), deduped as "<sourceId>|C".
 //         New Booking.com cancellations: reveal the guest's relay email and send the
 //         feedback email (cancellationEmail.txt) — see GUEST_EMAIL_MODE below.
@@ -262,7 +263,9 @@ function guestName(g) {
 
     // ---- new booking ----
     if (seenSet.has(r.sourceId)) continue;        // already handled in a prior run
-    if (r.modifiedAt) { newSourceIds.push(r.sourceId); continue; }        // skip modifications for now
+    // (Don't skip on modifiedAt: a new booking modified the same day still has it set, and
+    // skipping dropped a real new booking. Modifications of already-reported bookings are
+    // already caught by the seenSet check above, so they don't re-report.)
     if (!r.fromDate || !checkOut) { newSourceIds.push(r.sourceId); continue; }
     const allNights = nights(r.fromDate, checkOut);
     // Only report nights from today onward (skip yesterday/past nights).
