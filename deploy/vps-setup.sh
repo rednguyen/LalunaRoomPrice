@@ -27,7 +27,7 @@ fi
 
 echo "== 3. Packages"
 apt-get update
-apt-get install -y curl git ca-certificates ufw
+apt-get install -y curl git ca-certificates ufw xvfb   # xvfb: virtual screen for the visible bot browser
 if ! node -v 2>/dev/null | grep -q '^v20\.'; then
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
   apt-get install -y nodejs

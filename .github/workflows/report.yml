@@ -59,7 +59,16 @@ jobs:
           for attempt in 1 2; do
             echo "::group::Attempt $attempt"
             rm -f "$STATE"   # re-check the login each attempt
-            code=0; node src/report.js || code=$?
+            code=0
+            if [ "$ON_VPS" = "true" ]; then
+              # VPS: the FULL Chromium, visible on a virtual screen — the same browser the RDP
+              # launcher uses. The headless shell looks like a different device to SiteMinder,
+              # which then discards the profile's trusted-device key.
+              command -v xvfb-run >/dev/null || { echo "xvfb missing — on the VPS run: apt-get install -y xvfb"; exit 1; }
+              xvfb-run -a -s "-screen 0 1920x1080x24" node src/report.js || code=$?
+            else
+              node src/report.js || code=$?
+            fi
             echo "::endgroup::"
             [ "$code" -eq 0 ] && exit 0
             if [ "$code" -eq 3 ]; then echo "SiteMinder wants step-up auth — not retrying."; exit 1; fi
@@ -75,7 +84,7 @@ jobs:
           SM_DAYS: "450"
           SM_DEVICE_TRUST: skip
           SM_SUCCESS_URL_GLOB: https://platform.siteminder.com/**
-          SM_HEADFUL: "false"
+          SM_HEADFUL: ${{ env.ON_VPS == 'true' && 'true' || 'false' }}   # VPS: visible on the xvfb screen
           # zalo: no → no token, so src/zalo.js prints the reports instead of posting them.
           # (Cron runs have no inputs: null != 'no', so they always post.)
           # Order matters: `cond && '' || x` always yields x ('' is falsy), so the token comes first.

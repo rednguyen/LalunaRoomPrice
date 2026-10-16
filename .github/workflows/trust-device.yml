@@ -21,9 +21,14 @@ jobs:
           node-version: "20"
       - run: npm ci
       - run: npx playwright install chromium
+      # Full Chromium, visible on a virtual screen — the same browser the report run and the RDP
+      # launcher use, so SiteMinder sees one consistent trusted device.
       - name: Log in and wait for your click on the email link
-        run: node src/auth.js
+        run: |
+          command -v xvfb-run >/dev/null || { echo "xvfb missing — on the VPS run: apt-get install -y xvfb"; exit 1; }
+          xvfb-run -a -s "-screen 0 1920x1080x24" node src/auth.js
         env:
+          SM_HEADFUL: "true"
           SM_USER: ${{ secrets.SM_USER }}
           SM_PASS: ${{ secrets.SM_PASS }}
           SM_TOTP_SECRET: ${{ secrets.SM_TOTP_SECRET }}
