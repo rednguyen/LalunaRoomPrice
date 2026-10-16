@@ -29,7 +29,7 @@ jobs:
   report:
     # Normally the Ubuntu VPS (self-hosted runner labelled "laluna", see VPS_SETUP.md).
     runs-on: ${{ inputs.runner == 'github' && 'ubuntu-latest' || fromJSON('["self-hosted","linux","laluna"]') }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: write        # needed to commit the dedupe log back
     env:
@@ -51,16 +51,20 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install ${{ runner.environment == 'github-hosted' && '--with-deps' || '' }} chromium
 
+      # Gentle on SiteMinder's risk checks: at most one retry, 10 min later, and none at all
+      # when it asks for step-up auth (exit 3) — retrying that only adds logins.
       - name: Run report
         run: |
           STATE="${SM_STATE_FILE:-state/storageState.json}"
-          for attempt in 1 2 3; do
+          for attempt in 1 2; do
             echo "::group::Attempt $attempt"
-            rm -f "$STATE"   # re-check the login each attempt (clears a step-up'd session)
-            if node src/report.js; then echo "::endgroup::"; exit 0; fi
-            echo "Attempt $attempt failed."
+            rm -f "$STATE"   # re-check the login each attempt
+            code=0; node src/report.js || code=$?
             echo "::endgroup::"
-            [ "$attempt" -lt 3 ] && { echo "Retrying in 90s..."; sleep 90; }
+            [ "$code" -eq 0 ] && exit 0
+            if [ "$code" -eq 3 ]; then echo "SiteMinder wants step-up auth — not retrying."; exit 1; fi
+            echo "Attempt $attempt failed (exit $code)."
+            [ "$attempt" -lt 2 ] && { echo "Retrying in 10 min..."; sleep 600; }
           done
           echo "All attempts failed."; exit 1
         env:
@@ -75,6 +79,7 @@ jobs:
           # zalo: no → no token, so src/zalo.js prints the reports instead of posting them.
           # (Cron runs have no inputs: null != 'no', so they always post.)
           ZALO_BOT_TOKEN: ${{ inputs.zalo == 'no' && '' || secrets.ZALO_BOT_TOKEN }}
+          REPORT_NO_SAVE: ${{ inputs.zalo == 'no' && 'true' || '' }}   # test run: don't mark anything reported
           ZALO_CHAT_ID: ${{ secrets.ZALO_CHAT_ID }}
           # VPS only: the trusted SiteMinder profile (reveals guest emails) + guest emails.
           SM_PROFILE_DIR: ${{ env.ON_VPS == 'true' && '/home/laluna/sm-profile' || '' }}

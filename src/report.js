@@ -22,6 +22,10 @@ const gmail = require("./gmailSend");
 //   off = never   ·   dry-run (default) = reveal + build the email, don't send   ·   live = send
 const GUEST_EMAIL_MODE = (process.env.GUEST_EMAIL_MODE || "dry-run").toLowerCase();
 const GUEST_EMAIL_ACTIVE = !!process.env.SM_PROFILE_DIR && GUEST_EMAIL_MODE !== "off";
+// REPORT_NO_SAVE=true (the workflow's "Post to Zalo: no"): a test run that prints the reports
+// and doesn't mark anything as reported, so the next real run still posts it all to Zalo.
+// (Emailed guests are still logged — they really were emailed.)
+const SAVE_SEEN = String(process.env.REPORT_NO_SAVE).toLowerCase() !== "true";
 const EMAILED_FILE = process.env.GUEST_EMAIL_LOG || "state/emailedGuests.json";
 const isBookingCom = (r) => /booking\.?com/i.test(r.channel && r.channel.name);
 // Extra line under a cancellation whose guest was emailed (the email lands in the
@@ -343,7 +347,7 @@ function guestName(g) {
 
   console.log("\n===== BOOKINGS =====\n" + bookingReport + "\n");
   if (!delivered(await sendToZalo(bookingReport))) throw new Error("Zalo send failed (bookings) — not marked as reported; will retry.");
-  if (newSourceIds.length) { seen.push(...newSourceIds); saveSeen(seen); }
+  if (SAVE_SEEN && newSourceIds.length) { seen.push(...newSourceIds); saveSeen(seen); }
 
   // Email the Booking.com guests BEFORE the cancellations report, so each line can say
   // whether it went out. A failure never blocks the report — it becomes a ⚠️ line.
@@ -386,5 +390,10 @@ function guestName(g) {
     console.log("\n===== CANCELLATIONS =====\n" + cancelReport + "\n");
     if (!delivered(await sendToZalo(cancelReport))) throw new Error("Zalo send failed (cancellations) — not marked as reported; will retry.");
   }
-  if (newCancelKeys.length) { seen.push(...newCancelKeys); saveSeen(seen); }
-})().catch((e) => { console.error("❌", e.message); process.exit(1); });
+  if (SAVE_SEEN && newCancelKeys.length) { seen.push(...newCancelKeys); saveSeen(seen); }
+})().catch((e) => {
+  console.error("❌", e.message);
+  // Exit 3 = SiteMinder wants step-up auth. Retrying only adds logins (and risks a lock),
+  // so the workflow doesn't retry on it.
+  process.exit(/step_up_required/.test(e.message) ? 3 : 1);
+});
