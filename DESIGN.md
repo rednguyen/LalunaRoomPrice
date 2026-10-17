@@ -96,6 +96,35 @@ Two internal endpoints, both authenticated the same way.
 The client reuses the saved session and re-logs in once on a 401 (`withGraphqlAuth`); a
 `step_up_required` 403 instead fails fast so the outer retry can start fresh (see §7.2).
 
+### 3.2 VPS: reuse the session, never re-login per run (the "re-trust every run" trap)
+
+On the VPS the session and the trusted device live in the **browser profile** (`SM_PROFILE_DIR`),
+not in `storageState.json`. Getting this wrong cost a lot of debugging, so it's written down:
+
+- **Entering SiteMinder is slow.** A logged-in, trusted profile opening `authx…/login` walks
+  SiteMinder's hand-off (`/authenticate` → `/authenticated` → `property` → a brief
+  `…/forbidden` → re-authorise → `platform/dashboard`), looping on `createTrustedDevice` 401s
+  for **up to ~45–60 s** before the dashboard appears. The screen in the meantime is a bare
+  **"Loading …"** page.
+- **The trap (fixed 2026-10-17).** The workflow deletes `sm-state.json` each run, which made
+  `withGraphqlAuth` call `login()` every run. `login()`'s "already logged in?" check waited only
+  **10 s**; on the slow hand-off it gave up, fell through to a **fresh form-login**, and (skip
+  mode) clicked **"Skip"** — which replaced the **trusted** session cookie (`AUTH_X_TOKEN`) with
+  an **untrusted** one. The guest-email reveal then failed ("isn't a trusted device"), and a
+  manual **Trust** run was needed to refresh a trusted session. So the report kept breaking its
+  own trust, every run. (The device itself stays trusted the whole time — only the *session* was
+  being downgraded; that's why re-trust needs no email: SiteMinder recognises the device via the
+  IndexedDB key and just re-issues a trusted session.)
+- **The fix.** In profile mode, `withGraphqlAuth` does **not** log in just because the state file
+  is missing — it goes straight to `withGraphql`, which **reuses the profile session** and waits
+  patiently (**90 s**) for the dashboard through the hand-off. A real `login()` happens only on a
+  genuine `AuthError` (the session actually expired — roughly monthly; the persistent device key
+  means that re-login usually stays trusted with no re-trust).
+- **Operating rules that keep the session trusted:** never open the RDP "SiteMinder (bot profile)"
+  browser (a different Chromium build revokes the device, §13); do your own SiteMinder checks on
+  the **mobile app**, not the web browser on another computer (two web sessions from different
+  places collide and can force a re-login or an account lock).
+
 ### 3.2 Availability — `roomTypeDates`
 
 Returns `{ roomTypeUuid, date, available }` per room-type per date. The date range is
