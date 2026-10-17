@@ -2,7 +2,7 @@
 
 The daily report runs on an Ubuntu VPS as a GitHub **self-hosted runner**. cron-job.org keeps
 triggering it as before. The VPS keeps SiteMinder's **trusted browser profile**
-(`/home/laluna/sm-profile`), which is what lets the report reveal Booking.com guests' emails
+(`/home/laluna/sm-profile`), which is what lets the report reveal Booking.com / Agoda guests' emails
 and send them the cancellation feedback email. Everything is headless: you only ever use SSH.
 
 ## 1. Connect
