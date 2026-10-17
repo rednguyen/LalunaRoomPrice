@@ -27,7 +27,7 @@ async function withGraphql(fn) {
       // that hand-off. If the login form shows instead, the session is gone → log in.
       await page.goto(CFG.loginUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
       const onDashboard = (u) => u.hostname === "platform.siteminder.com" && u.pathname.startsWith("/dashboard/");
-      const landed = await page.waitForURL(onDashboard, { timeout: 60000 }).then(() => true, () => false);
+      const landed = await page.waitForURL(onDashboard, { timeout: 90000 }).then(() => true, () => false);
       if (!landed) throw new AuthError(`didn't reach the dashboard from the login page (stopped on ${new URL(page.url()).pathname})`);
       await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
     } else {
@@ -73,7 +73,12 @@ async function withGraphql(fn) {
 
 // Reuse the saved session; log in if it's missing or expired, then retry once.
 async function withGraphqlAuth(fn) {
-  if (!fs.existsSync(CFG.stateFile)) {
+  // Profile mode (VPS): the session lives in the browser profile, so REUSE it — withGraphql
+  // navigates the login URL and waits patiently for the dashboard. We do NOT log in just
+  // because the state file is missing: a fresh login (skip mode) clicks "Skip", which replaces
+  // the trusted session with an untrusted one and breaks the guest-email reveal. Only log in on
+  // a genuine AuthError (the session is really gone — rare).
+  if (!CFG.profileDir && !fs.existsSync(CFG.stateFile)) {
     console.log("No saved session — logging in…");
     await login();
   }
