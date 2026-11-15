@@ -442,12 +442,12 @@ Travel Agent bookings come from the hotel's own API, not SiteMinder (`src/taSale
   booking stays unseen until mapped (same rule as OTA).
 - **Report:** `📊 Báo Cáo TA Sales ngày …`, the same layout as the OTA report (📅 night lines
   with `còn` from the same availability snapshot, 👤 `agent - id | guest`, 💰 line), sent
-  **only when there are new TA bookings**. Order in Zalo: OTA Sales → TA Sales → Hủy phòng.
+  **every run** like the OTA report (`✅ Không có booking mới nào đến thời điểm hiện tại.` when
+  there are none — but nothing when the TA API failed). Order in Zalo: OTA Sales → TA Sales → Hủy phòng.
 - **Dedupe:** its own log `state/seenTaBookings.json` (`{ ids }`, rolling last 100, repo-tracked
   like the OTA log). The API always returns the latest 10, so an id must stay remembered until 10
   newer TA bookings push it out — sharing the OTA log (~10 keys/day) would forget it too soon.
-  **First run** (no log yet): the current 10 are marked as seen without being posted. A test run
-  (`REPORT_NO_SAVE`) shows them instead and saves nothing.
+  **First run** (no log yet): nothing has been reported, so the current 10 are all posted once.
 - **Failure:** if the TA API is down, the TA report is skipped (logged) and the OTA report goes
   out as usual; the TA bookings are still in the latest 10 next run.
 

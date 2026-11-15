@@ -48,9 +48,8 @@ async function fetchTaBookings() {
 
 const roomTypeForCode = (code) => SM_BY_CODE.get(normCode(code)) || null;
 
-// null = no log yet (first run: the current bookings get marked as already reported).
 function loadSeenTa() {
-  try { return JSON.parse(fs.readFileSync(SEEN_FILE, "utf8")).ids || []; } catch { return null; }
+  try { return JSON.parse(fs.readFileSync(SEEN_FILE, "utf8")).ids || []; } catch { return []; }
 }
 function saveSeenTa(ids) {
   fs.mkdirSync(path.dirname(SEEN_FILE), { recursive: true });

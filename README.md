@@ -126,9 +126,9 @@ booking list. Example:
 - **Cancellations** go in a separate **❌ Hủy phòng** message, sent only when there
   are any. Modifications are skipped.
 - **📊 Báo Cáo TA Sales** — Travel Agent bookings from the TA API (`src/taSales.js`, latest
-  10), same layout as the OTA report, sent between the OTA report and Hủy phòng, only when
-  there are new ones. Room codes map via the `"TA"` key in `roomMappings.json`; deduped in
-  its own log `state/seenTaBookings.json` (the first run just marks the current 10 as seen).
+  10), same layout as the OTA report, sent between the OTA report and Hủy phòng, every run
+  (`✅ Không có booking mới…` when there are none). Room codes map via the `"TA"` key in `roomMappings.json`; deduped in
+  its own log `state/seenTaBookings.json` (the first run posts the current 10 once).
 - Messages are split to stay under Zalo's 2000-char limit.
 
 Config: `SM_SPID`, `SM_DAYS`, `SM_TOPUP_ROOMS` (rooms that get a "top up" note when

@@ -353,18 +353,11 @@ function salesSections(perRoom, avail) {
     });
   }
 
-  // ---- TA bookings (own dedupe log) ----
-  // First run (no log yet): mark the current latest-10 as already reported instead of posting
-  // them all. A test run (REPORT_NO_SAVE) skips that and shows them, saving nothing.
+  // ---- TA bookings (own dedupe log; no log yet = nothing reported, so all are new) ----
   const taSeen = ta.loadSeenTa();
   const taPerRoom = new Map();
   const newTaIds = [];
-  if (taBookings && taSeen === null && SAVE_SEEN) {
-    console.log(`TA: no dedupe log yet — marking the current ${taBookings.length} booking(s) as already reported.`);
-    ta.saveSeenTa(taBookings.map((b) => b.id));
-    taBookings = [];
-  }
-  const taSeenSet = new Set(taSeen || []);
+  const taSeenSet = new Set(taSeen);
   for (const b of taBookings || []) {
     if (taSeenSet.has(b.id)) continue;
     if (!b.checkIn || !b.checkOut || !b.rooms.length) { newTaIds.push(b.id); continue; }
@@ -388,11 +381,14 @@ function salesSections(perRoom, avail) {
   const bookingReport = sections.length === 0
     ? `${title}\n\n✅ Không có booking mới nào đến thời điểm hiện tại.`
     : `${title}\n\n` + sections.join(`\n${SEP}\n`);
-  // TA report: sent only when there are new TA bookings (they're rare).
+  // TA report: always sent, like the OTA one — except when the TA API couldn't be read
+  // (then "no new bookings" would be wrong, so nothing is sent).
+  const taTitle = `📊 Báo Cáo TA Sales ngày ${ddmmyyyy(todayISO)}:`;
   const taSections = salesSections(taPerRoom, avail);
-  const taReport = taSections.length
-    ? `📊 Báo Cáo TA Sales ngày ${ddmmyyyy(todayISO)}:\n\n` + taSections.join(`\n${SEP}\n`)
-    : null;
+  const taReport = !taBookings ? null
+    : taSections.length === 0
+      ? `${taTitle}\n\n✅ Không có booking mới nào đến thời điểm hiện tại.`
+      : `${taTitle}\n\n` + taSections.join(`\n${SEP}\n`);
 
   if (unmapped.length) {
     console.log(`\n⚠️ ${unmapped.length} unmapped room stay(s):`);
@@ -414,7 +410,7 @@ function salesSections(perRoom, avail) {
     console.log("\n===== TA BOOKINGS =====\n" + taReport + "\n");
     if (!delivered(await sendToZalo(taReport))) throw new Error("Zalo send failed (TA bookings) — not marked as reported; will retry.");
   }
-  if (SAVE_SEEN && newTaIds.length) ta.saveSeenTa([...(taSeen || []), ...newTaIds]);
+  if (SAVE_SEEN && newTaIds.length) ta.saveSeenTa([...taSeen, ...newTaIds]);
 
   // Email the Booking.com / Agoda guests BEFORE the cancellations report, so each line can say
   // whether it went out. A failure never blocks the report — it becomes a ⚠️ line.
