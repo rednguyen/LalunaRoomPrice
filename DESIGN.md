@@ -384,9 +384,9 @@ roomMappings.json        SiteMinder name → per-channel OTA room name (6 OTAs +
 
 ---
 
-## 13. Cancellation feedback emails (Booking.com)
+## 13. Cancellation feedback emails (Booking.com + Agoda)
 
-For each **new Booking.com cancellation**, the report emails the guest a feedback note
+For each **new Booking.com or Agoda cancellation**, the report emails the guest a feedback note
 (`cancellationEmail.txt`) **before** sending the cancellations report to Zalo.
 
 1. **Reveal the email** (`src/siteminderGuest.js`). `getCmReservationDetail` on
@@ -400,10 +400,11 @@ For each **new Booking.com cancellation**, the report emails the guest a feedbac
    stored in IndexedDB (`platform-property-trusted-devices` / `device-keys`) when the device was
    trusted, so this needs the persistent profile (`SM_PROFILE_DIR`), trusted once with
    `SM_DEVICE_TRUST=manual` (VPS: the "Trust VPS in SiteMinder" workflow). Booking.com gives a
-   relay address (`…@guest.booking.com`); Agoda gives `…@agoda-messaging.com`.
+   relay address (`…@guest.booking.com`); Agoda gives `…@agoda-messaging.com`. The channel
+   check is `isEmailChannel` in `report.js` (channel name matches `booking.com` or `agoda`).
 2. **Send** (`src/gmailSend.js`) via Gmail SMTP with an App Password from
-   `hoianlaluna@gmail.com`, the address Booking.com accepts (verified by hand: an email to a
-   cancelled reservation's relay address lands in its extranet conversation).
+   `hoianlaluna@gmail.com`, the address Booking.com and Agoda accept (verified by hand for both: an
+   email to a cancelled reservation's relay address lands in its extranet conversation).
 3. **Zalo:** only when Gmail **accepted** the email does the cancellation get an extra line
    `   ✉️ Đã hỏi thăm khách trên Extranet`. Not sent (failed, dry-run, other channels) → no
    note. Bounces aren't checked.
@@ -457,6 +458,8 @@ Travel Agent bookings come from the hotel's own API, not SiteMinder (`src/taSale
 - **2026-11-15 — TA Sales report.** New `📊 Báo Cáo TA Sales` message between the OTA report and
   Hủy phòng (§14).
 
+- **2026-10-17 — Agoda cancellation emails.** Agoda cancellations now get the same feedback
+  email and `✉️ Đã hỏi thăm khách trên Extranet` line as Booking.com (§13).
 - **2026-10-16 — cancellation emails.** Emailed Booking.com cancellations get a
   `✉️ Đã hỏi thăm khách trên Extranet` line (§13).
 

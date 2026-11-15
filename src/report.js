@@ -5,7 +5,7 @@
 //         sourceId (rolling last 100). A booking reports once; later modifications of an
 //         already-reported booking are skipped by the dedupe (seen) check.
 // Step 3: cancellations (by cancellation date), deduped as "<sourceId>|C".
-//         New Booking.com cancellations: reveal the guest's relay email and send the
+//         New Booking.com / Agoda cancellations: reveal the guest's relay email and send the
 //         feedback email (cancellationEmail.txt) — see GUEST_EMAIL_MODE below.
 // Step 4: Travel Agent bookings from the TA API (latest 10), deduped in their own log
 //         (src/taSales.js) -> a separate "Báo Cáo TA Sales" report, same layout.
@@ -20,7 +20,7 @@ const { revealGuestEmail } = require("./siteminderGuest");
 const gmail = require("./gmailSend");
 const ta = require("./taSales");
 
-// Cancellation feedback emails (Booking.com only for now). Needs the trusted SiteMinder
+// Cancellation feedback emails (Booking.com + Agoda). Needs the trusted SiteMinder
 // browser profile (SM_PROFILE_DIR) to reveal emails; without it the feature is inactive
 // and the report is unchanged.
 //   off = never   ·   dry-run (default) = reveal + build the email, don't send   ·   live = send
@@ -31,7 +31,9 @@ const GUEST_EMAIL_ACTIVE = !!process.env.SM_PROFILE_DIR && GUEST_EMAIL_MODE !== 
 // (Emailed guests are still logged — they really were emailed.)
 const SAVE_SEEN = String(process.env.REPORT_NO_SAVE).toLowerCase() !== "true";
 const EMAILED_FILE = process.env.GUEST_EMAIL_LOG || "state/emailedGuests.json";
-const isBookingCom = (r) => /booking\.?com/i.test(r.channel && r.channel.name);
+// Channels whose guests get the email: both give a relay address that lands in the
+// reservation's extranet conversation (Booking.com …@guest.booking.com, Agoda …@agoda-messaging.com).
+const isEmailChannel = (r) => /booking\.?com|agoda/i.test(r.channel && r.channel.name);
 // Extra line under a cancellation whose guest was emailed (the email lands in the
 // reservation's extranet conversation). Not-emailed ones get nothing.
 const EMAILED_NOTE = "\n   ✉️ Đã hỏi thăm khách trên Extranet";
@@ -283,7 +285,7 @@ function salesSections(perRoom, avail) {
     const guests = new Map();
     if (GUEST_EMAIL_ACTIVE) {
       for (const r of cancelled) {
-        if (!isBookingCom(r) || seenSet.has(`${r.sourceId}|C`) || emailedSet.has(r.sourceId)) continue;
+        if (!isEmailChannel(r) || seenSet.has(`${r.sourceId}|C`) || emailedSet.has(r.sourceId)) continue;
         try { guests.set(r.sourceId, await revealGuestEmail(run, page, SPID, r.smPlatformReservationId)); }
         catch (e) { guests.set(r.sourceId, { error: e.message }); }
       }
@@ -345,7 +347,7 @@ function salesSections(perRoom, avail) {
     const when = r.fromDate && checkOut ? stayRange(r.fromDate, checkOut) : "?";
     cancellations.push({
       sourceId: r.sourceId,
-      emailed: GUEST_EMAIL_ACTIVE && isBookingCom(r),   // guest gets the feedback email
+      emailed: GUEST_EMAIL_ACTIVE && isEmailChannel(r),   // guest gets the feedback email
       text: `👤 ${r.channel && r.channel.name} - ${r.sourceId} | ${guestName(r.mainGuest)}\n` +
         `   🛏️ ${rooms.join(", ") || "(?)"} · ${when}${total != null ? ` · 💰 ${fmtMoney(total, r.currency)}` : ""}`,
     });
@@ -414,7 +416,7 @@ function salesSections(perRoom, avail) {
   }
   if (SAVE_SEEN && newTaIds.length) ta.saveSeenTa([...(taSeen || []), ...newTaIds]);
 
-  // Email the Booking.com guests BEFORE the cancellations report, so each line can say
+  // Email the Booking.com / Agoda guests BEFORE the cancellations report, so each line can say
   // whether it went out. A failure never blocks the report — it becomes a ⚠️ line.
   const emailStatus = new Map();   // sourceId -> "sent" | "dry-run" | "failed"
   for (const c of cancellations.filter((x) => x.emailed)) {
