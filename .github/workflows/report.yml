@@ -96,7 +96,7 @@ jobs:
           # VPS only: the trusted SiteMinder profile (reveals guest emails) + guest emails.
           SM_PROFILE_DIR: ${{ env.ON_VPS == 'true' && '/home/laluna/sm-profile' || '' }}
           SM_STATE_FILE: ${{ env.ON_VPS == 'true' && '/home/laluna/sm-state.json' || '' }}
-          GUEST_EMAIL_MODE: ${{ vars.GUEST_EMAIL_MODE || 'dry-run' }}
+          GUEST_EMAIL_MODE: ${{ inputs.zalo == 'no' && 'dry-run' || vars.GUEST_EMAIL_MODE || 'dry-run' }}   # test run (zalo: no): never emails guests
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           GMAIL_FROM: ${{ secrets.GMAIL_FROM }}
