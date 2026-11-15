@@ -125,10 +125,14 @@ booking list. Example:
   check-in→check-out, and `tổng` = the **full booking total** (all rooms, all nights).
 - **Cancellations** go in a separate **❌ Hủy phòng** message, sent only when there
   are any. Modifications are skipped.
+- **📊 Báo Cáo TA Sales** — Travel Agent bookings from the TA API (`src/taSales.js`, latest
+  10), same layout as the OTA report, sent between the OTA report and Hủy phòng, only when
+  there are new ones. Room codes map via the `"TA"` key in `roomMappings.json`; deduped in
+  its own log `state/seenTaBookings.json` (the first run just marks the current 10 as seen).
 - Messages are split to stay under Zalo's 2000-char limit.
 
 Config: `SM_SPID`, `SM_DAYS`, `SM_TOPUP_ROOMS` (rooms that get a "top up" note when
-`còn=0`), `ZALO_BOT_TOKEN`, `ZALO_CHAT_ID`. Device trust is `skip` (untrusted session).
+`còn=0`), `ZALO_BOT_TOKEN`, `ZALO_CHAT_ID`, `TA_API_KEY` (no key = TA report skipped). Device trust is `skip` (untrusted session).
 
 ## Automated schedule (GitHub Actions)
 

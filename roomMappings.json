@@ -6,7 +6,8 @@
     "Trip.com": "Superior Double Room",
     "OhMyHotel": "Superior Double Room",
     "Traveloka": "Superior Double",
-     "Direct Booking": "Superior Double, Large Window"
+     "Direct Booking": "Superior Double, Large Window",
+    "TA": "SUPDB"
   },
   "Superior Twin": {
     "Booking.com": "Superior Twin Room with Large Window",
@@ -15,7 +16,8 @@
     "Trip.com": "Superior Twin Room",
     "OhMyHotel": "Superior Twin Room",
     "Traveloka": "Superior Twin",
-     "Direct Booking": "Superior Twin, Large Window"
+     "Direct Booking": "Superior Twin, Large Window",
+    "TA": "SUPTW"
   },
   "Deluxe Double": {
     "Booking.com": "Deluxe King Room with Balcony",
@@ -24,7 +26,8 @@
     "Trip.com": "Deluxe Double Room with Pool View",
     "OhMyHotel": "Deluxe Double Room",
     "Traveloka": "Deluxe Double",
-     "Direct Booking": "Deluxe Double, Pool/Garden/City View"
+     "Direct Booking": "Deluxe Double, Pool/Garden/City View",
+    "TA": "DLXDB"
   },
   "Deluxe Twin": {
     "Booking.com": "Deluxe Twin Room with Balcony",
@@ -33,7 +36,8 @@
     "Trip.com": "Deluxe Twin Room with Garden or City view",
     "OhMyHotel": "Deluxe Twin Room",
     "Traveloka": "Deluxe Twin",
-     "Direct Booking": "Deluxe Twin, Garden/City view"
+     "Direct Booking": "Deluxe Twin, Garden/City view",
+    "TA": "DLXTW"
   },
   "Super Deluxe Double": {
     "Booking.com": "Super Deluxe Double Room with Balcony and River View",
@@ -42,7 +46,8 @@
     "Trip.com": "Super Deluxe Double Room with River View",
     "OhMyHotel": "Super Deluxe Double Room",
     "Traveloka": "Super Deluxe Double",
-     "Direct Booking": "Super Deluxe Double, River View"
+     "Direct Booking": "Super Deluxe Double, River View",
+    "TA": "SDXDB"
   },
   "Super Deluxe Twin": {
     "Booking.com": "Super Deluxe Twin Room with Balcony and River View",
@@ -51,7 +56,8 @@
     "Trip.com": "Super Deluxe Twin Room with River View",
     "OhMyHotel": "Super Deluxe Twin Room",
     "Traveloka": "Super Deluxe Twin",
-     "Direct Booking": "Super Deluxe Twin, River View"
+     "Direct Booking": "Super Deluxe Twin, River View",
+    "TA": "SDXTW"
   },
   "Luxury": {
     "Booking.com": "Luxury Double Room, Bathtub with Balcony and River View",
@@ -60,7 +66,8 @@
     "Trip.com": "Luxury King with River View",
     "OhMyHotel": "Laluna Luxury Room",
     "Traveloka": "Laluna Luxury",
-     "Direct Booking": "Luxury King, River View"
+     "Direct Booking": "Luxury King, River View",
+    "TA": "LUXRY"
   },
   "Suite": {
     "Booking.com": "King Suite with Balcony and River View",
@@ -69,7 +76,8 @@
     "Trip.com": "Suite with River View",
     "OhMyHotel": "Suite River View",
     "Traveloka": "King Suites",
-     "Direct Booking": "Suite, River View"
+     "Direct Booking": "Suite, River View",
+    "TA": "SUITE"
   },
   "Family Pool View (DLX)": {
     "Booking.com": "Family Connecting Room with Balcony and Pool View",
@@ -78,7 +86,8 @@
     "Trip.com": "Family Connecting Room With Pool View",
     "OhMyHotel": "Deluxe Family Next Door",
     "Traveloka": "Family Pool View",
-     "Direct Booking": "Family Connecting Room, Pool View"
+     "Direct Booking": "Family Connecting Room, Pool View",
+    "TA": ["FAMDC", "FAMDTW"]
   },
   "Family River View (SUPER DLX)": {
     "Booking.com": "Family Connecting Room with Bathroom - Balcony and River View",
@@ -87,6 +96,7 @@
     "Trip.com": "Family Connecting Room With River View",
     "OhMyHotel": "Superdeluxe Family Connecting",
     "Traveloka": "Family River View",
-     "Direct Booking": "Family Connecting Room, River View"
+     "Direct Booking": "Family Connecting Room, River View",
+    "TA": ["FAMS", "FAMSTW"]
   }
 }

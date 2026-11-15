@@ -326,7 +326,8 @@ runner** on a residential/stable IP, where `skip` mode always works.
 ```
 src/auth.js              Automated login + session capture (TOTP, trusted-device modes)
 src/graphql.js           Authenticated GraphQL client (session reuse + re-login on 401)
-src/report.js            The daily OTA sales report (availability + reservations)
+src/report.js            The daily OTA + TA sales reports (availability + reservations)
+src/taSales.js           TA bookings API client + TA room-code mapping + TA dedupe log (§14)
 src/fetchAvailability.js Standalone availability → data/availability.csv exporter
 src/zalo.js              Zalo Bot API sender + 2000-char section-aware splitting
 src/siteminderGuest.js   Reveal a guest's real email (trusted-device challenge, §13)
@@ -426,7 +427,35 @@ click: the "Trust VPS in SiteMinder" workflow (`SM_DEVICE_TRUST=manual`) + the e
 
 ---
 
+## 14. TA Sales report (Travel Agents)
+
+Travel Agent bookings come from the hotel's own API, not SiteMinder (`src/taSales.js`):
+`GET TA_API_URL` with header `x-api-key: TA_API_KEY` →
+`{ rows: [{ id, agent, checkIn, checkOut, currency, totalAmount, guest, rooms }] }`, the
+**most recent 10** TA bookings. `rooms` is a comma-separated string of room codes, one per room
+(`"SUPDB, SUPDB"` = 2 rooms); `guest` is a single string.
+
+- **Room codes** map to SiteMinder rooms via the `"TA"` key in `roomMappings.json` — one code or
+  a list (`["FAMDC", "FAMDTW"]`), matched exactly (case/space-insensitive). It's not a channel:
+  the OTA prefix matching never looks at it. Unknown codes are logged as unmapped and the
+  booking stays unseen until mapped (same rule as OTA).
+- **Report:** `📊 Báo Cáo TA Sales ngày …`, the same layout as the OTA report (📅 night lines
+  with `còn` from the same availability snapshot, 👤 `agent - id | guest`, 💰 line), sent
+  **only when there are new TA bookings**. Order in Zalo: OTA Sales → TA Sales → Hủy phòng.
+- **Dedupe:** its own log `state/seenTaBookings.json` (`{ ids }`, rolling last 100, repo-tracked
+  like the OTA log). The API always returns the latest 10, so an id must stay remembered until 10
+  newer TA bookings push it out — sharing the OTA log (~10 keys/day) would forget it too soon.
+  **First run** (no log yet): the current 10 are marked as seen without being posted. A test run
+  (`REPORT_NO_SAVE`) shows them instead and saves nothing.
+- **Failure:** if the TA API is down, the TA report is skipped (logged) and the OTA report goes
+  out as usual; the TA bookings are still in the latest 10 next run.
+
+---
+
 ## 12. Changelog (report format)
+
+- **2026-11-15 — TA Sales report.** New `📊 Báo Cáo TA Sales` message between the OTA report and
+  Hủy phòng (§14).
 
 - **2026-10-16 — cancellation emails.** Emailed Booking.com cancellations get a
   `✉️ Đã hỏi thăm khách trên Extranet` line (§13).

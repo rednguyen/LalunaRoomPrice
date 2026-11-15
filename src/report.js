@@ -7,8 +7,10 @@
 // Step 3: cancellations (by cancellation date), deduped as "<sourceId>|C".
 //         New Booking.com cancellations: reveal the guest's relay email and send the
 //         feedback email (cancellationEmail.txt) — see GUEST_EMAIL_MODE below.
+// Step 4: Travel Agent bookings from the TA API (latest 10), deduped in their own log
+//         (src/taSales.js) -> a separate "Báo Cáo TA Sales" report, same layout.
 // Then aggregate rooms sold per SiteMinder room type per stay-night, format the
-// bookings report (+ a separate cancellations report) and hand them to Zalo.
+// reports and hand them to Zalo in order: OTA Sales -> TA Sales -> Hủy phòng.
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
@@ -16,6 +18,7 @@ const { withGraphqlAuth, SPID } = require("./graphql");
 const { sendToZalo } = require("./zalo");
 const { revealGuestEmail } = require("./siteminderGuest");
 const gmail = require("./gmailSend");
+const ta = require("./taSales");
 
 // Cancellation feedback emails (Booking.com only for now). Needs the trusted SiteMinder
 // browser profile (SM_PROFILE_DIR) to reveal emails; without it the feature is inactive
@@ -215,6 +218,38 @@ function guestName(g) {
   return [g.firstName, g.lastName].filter(Boolean).join(" ").trim();
 }
 
+// 💰 line: per-room nightly rate (total / #rooms / #nights), the stay, and the full booking total.
+function priceLine(amt, currency, numRooms, fromDate, checkOut) {
+  if (amt == null) return "";
+  const numNights = nights(fromDate, checkOut).length || 1;
+  return `\n   💰 ${fmtMoney(amt / (numRooms || 1) / numNights, currency)}/đêm · ${stayRange(fromDate, checkOut)} · tổng ${fmtMoney(amt, currency)}`;
+}
+
+// perRoom: smName -> { nights: Map(date->count), bookings: Map(id->line) }
+function addToRoom(perRoom, smRoom, stayNights, id, line) {
+  if (!perRoom.has(smRoom)) perRoom.set(smRoom, { nights: new Map(), bookings: new Map() });
+  const bucket = perRoom.get(smRoom);
+  for (const night of stayNights) bucket.nights.set(night, (bucket.nights.get(night) || 0) + 1);
+  bucket.bookings.set(id, line);
+}
+
+const SEP = "----------------------------------------";
+// One 🛏️ section per room (in roomMappings.json order): 📅 night lines, then the bookings.
+function salesSections(perRoom, avail) {
+  return Object.keys(roomMappings).filter((n) => perRoom.has(n)).map((smName) => {
+    const bucket = perRoom.get(smName);
+    const uuid = uuidByName.get(smName);
+    const sec = [`🛏️ ${smName}:`];
+    for (const run of nightLines(bucket.nights, (date) => avail.get(`${uuid}|${date}`))) {
+      let line = `📅 ${run.text}`;
+      if (run.hasZero && TOP_UP_ROOMS.has(smName)) line += " -> sales cân nhắc top up";
+      sec.push(line);
+    }
+    for (const line of bucket.bookings.values()) sec.push(line);
+    return sec.join("\n");
+  });
+}
+
 (async () => {
   if (!SPID) throw new Error("SM_SPID is not set in .env");
 
@@ -228,6 +263,16 @@ function guestName(g) {
   const seenSet = new Set(seen);
 
   const emailedSet = new Set(loadEmailed().map((e) => e.sourceId));
+
+  // TA bookings (separate API). A failure doesn't block the OTA report: the TA report is
+  // skipped and its bookings stay unseen, so the next run (still in the latest 10) reports them.
+  let taBookings = null;
+  if (ta.configured()) {
+    try { taBookings = await ta.fetchTaBookings(); }
+    catch (e) { console.log(`⚠️ TA bookings not fetched — TA report skipped this run: ${e.message}`); }
+  } else {
+    console.log("TA_API_KEY not set — TA report skipped.");
+  }
 
   const { avail, reservations, cancelled, guests } = await withGraphqlAuth(async (run, page) => {
     const avail = await fetchAvailability(run, todayISO);
@@ -271,24 +316,16 @@ function guestName(g) {
     // Only report nights from today onward (skip yesterday/past nights).
     const stayNights = allNights.filter((n) => n >= todayISO);
 
-    // Nightly rate is per room (total / #rooms / #nights); "tổng" is the full booking total.
-    const numNights = allNights.length || 1;
-    const numRooms = (r.roomStays || []).length || 1;
     const amt = r.totalAmount && r.totalAmount.amountAfterTax;
-    const priceLine = amt != null
-      ? `\n   💰 ${fmtMoney(amt / numRooms / numNights, r.currency)}/đêm · ${stayRange(r.fromDate, checkOut)} · tổng ${fmtMoney(amt, r.currency)}`
-      : "";
+    const line = `👤 ${r.channel && r.channel.name} - ${r.sourceId} | ${guestName(r.mainGuest)}` +
+      priceLine(amt, r.currency, (r.roomStays || []).length, r.fromDate, checkOut);
 
     let mappedAny = false;
     for (const rs of (r.roomStays || [])) {
       const smRoom = resolveRoomType(chKey, rs.roomName);
       if (!smRoom) { unmapped.push({ sourceId: r.sourceId, channel: r.channel && r.channel.name, roomName: rs.roomName }); continue; }
       mappedAny = true;                 // handled even if the stay has no nights today onward
-      if (stayNights.length === 0) continue;
-      if (!perRoom.has(smRoom)) perRoom.set(smRoom, { nights: new Map(), bookings: new Map() });
-      const bucket = perRoom.get(smRoom);
-      for (const night of stayNights) bucket.nights.set(night, (bucket.nights.get(night) || 0) + 1);
-      bucket.bookings.set(r.sourceId, `👤 ${r.channel && r.channel.name} - ${r.sourceId} | ${guestName(r.mainGuest)}${priceLine}`);
+      if (stayNights.length) addToRoom(perRoom, smRoom, stayNights, r.sourceId, line);
     }
     // Only consume reservations we actually reported; leave fully-unmapped ones
     // unseen so they retry once their channel/room mapping is added.
@@ -314,27 +351,46 @@ function guestName(g) {
     });
   }
 
+  // ---- TA bookings (own dedupe log) ----
+  // First run (no log yet): mark the current latest-10 as already reported instead of posting
+  // them all. A test run (REPORT_NO_SAVE) skips that and shows them, saving nothing.
+  const taSeen = ta.loadSeenTa();
+  const taPerRoom = new Map();
+  const newTaIds = [];
+  if (taBookings && taSeen === null && SAVE_SEEN) {
+    console.log(`TA: no dedupe log yet — marking the current ${taBookings.length} booking(s) as already reported.`);
+    ta.saveSeenTa(taBookings.map((b) => b.id));
+    taBookings = [];
+  }
+  const taSeenSet = new Set(taSeen || []);
+  for (const b of taBookings || []) {
+    if (taSeenSet.has(b.id)) continue;
+    if (!b.checkIn || !b.checkOut || !b.rooms.length) { newTaIds.push(b.id); continue; }
+    const stayNights = nights(b.checkIn, b.checkOut).filter((n) => n >= todayISO);
+    const line = `👤 ${b.agent} - ${b.id} | ${b.guest}` +
+      priceLine(b.totalAmount, b.currency, b.rooms.length, b.checkIn, b.checkOut);
+    let mappedAny = false;
+    for (const code of b.rooms) {
+      const smRoom = ta.roomTypeForCode(code);
+      if (!smRoom) { unmapped.push({ sourceId: b.id, channel: `TA ${b.agent}`, roomName: code }); continue; }
+      mappedAny = true;
+      if (stayNights.length) addToRoom(taPerRoom, smRoom, stayNights, b.id, line);
+    }
+    // Same rule as OTA: an unmapped booking stays unseen until its "TA" code is added.
+    if (mappedAny) newTaIds.push(b.id);
+  }
+
   // ---- build report text ----
   const title = `📊 Báo Cáo OTA Sales ngày ${ddmmyyyy(todayISO)}:`;
-  // Section order follows the key order in roomMappings.json.
-  const roomOrder = Object.keys(roomMappings).filter((n) => perRoom.has(n));
-  const SEP = "----------------------------------------";
-
-  const sections = roomOrder.map((smName) => {
-    const bucket = perRoom.get(smName);
-    const uuid = uuidByName.get(smName);
-    const sec = [`🛏️ ${smName}:`];
-    for (const run of nightLines(bucket.nights, (date) => avail.get(`${uuid}|${date}`))) {
-      let line = `📅 ${run.text}`;
-      if (run.hasZero && TOP_UP_ROOMS.has(smName)) line += " -> sales cân nhắc top up";
-      sec.push(line);
-    }
-    for (const line of bucket.bookings.values()) sec.push(line);
-    return sec.join("\n");
-  });
+  const sections = salesSections(perRoom, avail);
   const bookingReport = sections.length === 0
     ? `${title}\n\n✅ Không có booking mới nào đến thời điểm hiện tại.`
     : `${title}\n\n` + sections.join(`\n${SEP}\n`);
+  // TA report: sent only when there are new TA bookings (they're rare).
+  const taSections = salesSections(taPerRoom, avail);
+  const taReport = taSections.length
+    ? `📊 Báo Cáo TA Sales ngày ${ddmmyyyy(todayISO)}:\n\n` + taSections.join(`\n${SEP}\n`)
+    : null;
 
   if (unmapped.length) {
     console.log(`\n⚠️ ${unmapped.length} unmapped room stay(s):`);
@@ -351,6 +407,12 @@ function guestName(g) {
   console.log("\n===== BOOKINGS =====\n" + bookingReport + "\n");
   if (!delivered(await sendToZalo(bookingReport))) throw new Error("Zalo send failed (bookings) — not marked as reported; will retry.");
   if (SAVE_SEEN && newSourceIds.length) { seen.push(...newSourceIds); saveSeen(seen); }
+
+  if (taReport) {
+    console.log("\n===== TA BOOKINGS =====\n" + taReport + "\n");
+    if (!delivered(await sendToZalo(taReport))) throw new Error("Zalo send failed (TA bookings) — not marked as reported; will retry.");
+  }
+  if (SAVE_SEEN && newTaIds.length) ta.saveSeenTa([...(taSeen || []), ...newTaIds]);
 
   // Email the Booking.com guests BEFORE the cancellations report, so each line can say
   // whether it went out. A failure never blocks the report — it becomes a ⚠️ line.

@@ -3,6 +3,7 @@ node_modules/
 state/*
 !state/seenReservations.json
 !state/emailedGuests.json
+!state/seenTaBookings.json
 data/
 *.png
 *.har

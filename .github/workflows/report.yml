@@ -91,6 +91,8 @@ jobs:
           ZALO_BOT_TOKEN: ${{ inputs.zalo != 'no' && secrets.ZALO_BOT_TOKEN || '' }}
           REPORT_NO_SAVE: ${{ inputs.zalo == 'no' && 'true' || '' }}   # test run: don't mark anything reported
           ZALO_CHAT_ID: ${{ secrets.ZALO_CHAT_ID }}
+          # Travel Agent bookings (src/taSales.js) for the TA Sales report.
+          TA_API_KEY: ${{ secrets.TA_API_KEY }}
           # VPS only: the trusted SiteMinder profile (reveals guest emails) + guest emails.
           SM_PROFILE_DIR: ${{ env.ON_VPS == 'true' && '/home/laluna/sm-profile' || '' }}
           SM_STATE_FILE: ${{ env.ON_VPS == 'true' && '/home/laluna/sm-state.json' || '' }}
@@ -103,7 +105,7 @@ jobs:
       - name: Commit updated dedupe log
         if: always()
         run: |
-          for f in state/seenReservations.json state/emailedGuests.json; do
+          for f in state/seenReservations.json state/seenTaBookings.json state/emailedGuests.json; do
             if [ -f "$f" ]; then git add "$f"; fi
           done
           if git diff --cached --quiet; then
