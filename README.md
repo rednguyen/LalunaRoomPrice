@@ -125,7 +125,7 @@ booking list. Example:
   check-in→check-out, and `tổng` = the **full booking total** (all rooms, all nights).
 - **Cancellations** go in a separate **❌ Hủy phòng** message, sent only when there
   are any. Modifications are skipped.
-- **📊 Báo Cáo TA Sales** — Travel Agent bookings from the TA API (`src/taSales.js`, latest
+- **📊 Báo Cáo TA & FIT Sales** — Travel Agent bookings from the TA API (`src/taSales.js`, latest
   10), same layout as the OTA report, sent between the OTA report and Hủy phòng, every run
   (`✅ Không có booking mới…` when there are none). Room codes map via the `"TA"` key in `roomMappings.json`; deduped in
   its own log `state/seenTaBookings.json` (the first run posts the current 10 once).

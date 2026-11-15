@@ -8,9 +8,9 @@
 //         New Booking.com / Agoda cancellations: reveal the guest's relay email and send the
 //         feedback email (cancellationEmail.txt) — see GUEST_EMAIL_MODE below.
 // Step 4: Travel Agent bookings from the TA API (latest 10), deduped in their own log
-//         (src/taSales.js) -> a separate "Báo Cáo TA Sales" report, same layout.
+//         (src/taSales.js) -> a separate "Báo Cáo TA & FIT Sales" report, same layout.
 // Then aggregate rooms sold per SiteMinder room type per stay-night, format the
-// reports and hand them to Zalo in order: OTA Sales -> TA Sales -> Hủy phòng.
+// reports and hand them to Zalo in order: OTA Sales -> TA & FIT Sales -> Hủy phòng.
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
@@ -383,7 +383,7 @@ function salesSections(perRoom, avail) {
     : `${title}\n\n` + sections.join(`\n${SEP}\n`);
   // TA report: always sent, like the OTA one — except when the TA API couldn't be read
   // (then "no new bookings" would be wrong, so nothing is sent).
-  const taTitle = `📊 Báo Cáo TA Sales ngày ${ddmmyyyy(todayISO)}:`;
+  const taTitle = `📊 Báo Cáo TA & FIT Sales ngày ${ddmmyyyy(todayISO)}:`;
   const taSections = salesSections(taPerRoom, avail);
   const taReport = !taBookings ? null
     : taSections.length === 0

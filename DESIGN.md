@@ -440,10 +440,10 @@ Travel Agent bookings come from the hotel's own API, not SiteMinder (`src/taSale
   a list (`["FAMDC", "FAMDTW"]`), matched exactly (case/space-insensitive). It's not a channel:
   the OTA prefix matching never looks at it. Unknown codes are logged as unmapped and the
   booking stays unseen until mapped (same rule as OTA).
-- **Report:** `📊 Báo Cáo TA Sales ngày …`, the same layout as the OTA report (📅 night lines
+- **Report:** `📊 Báo Cáo TA & FIT Sales ngày …`, the same layout as the OTA report (📅 night lines
   with `còn` from the same availability snapshot, 👤 `agent - id | guest`, 💰 line), sent
   **every run** like the OTA report (`✅ Không có booking mới nào đến thời điểm hiện tại.` when
-  there are none — but nothing when the TA API failed). Order in Zalo: OTA Sales → TA Sales → Hủy phòng.
+  there are none — but nothing when the TA API failed). Order in Zalo: OTA Sales → TA & FIT Sales → Hủy phòng.
 - **Dedupe:** its own log `state/seenTaBookings.json` (`{ ids }`, rolling last 100, repo-tracked
   like the OTA log). The API always returns the latest 10, so an id must stay remembered until 10
   newer TA bookings push it out — sharing the OTA log (~10 keys/day) would forget it too soon.
@@ -455,7 +455,7 @@ Travel Agent bookings come from the hotel's own API, not SiteMinder (`src/taSale
 
 ## 12. Changelog (report format)
 
-- **2026-11-15 — TA Sales report.** New `📊 Báo Cáo TA Sales` message between the OTA report and
+- **2026-11-15 — TA Sales report.** New `📊 Báo Cáo TA & FIT Sales` message between the OTA report and
   Hủy phòng (§14).
 
 - **2026-10-17 — Agoda cancellation emails.** Agoda cancellations now get the same feedback
